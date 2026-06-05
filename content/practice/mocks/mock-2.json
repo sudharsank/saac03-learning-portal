@@ -1665,5 +1665,745 @@
       "read-replica",
       "cost-optimization"
     ]
+  },
+  {
+    "id": "m2-d3-q06",
+    "objective": "3.3",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to perform real-time analytics on streaming clickstream data with SQL queries. The data arrives via Kinesis Data Streams at 5 GB/hour. Which service enables SQL queries on the stream without managing infrastructure?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Amazon Kinesis Data Analytics (Apache Flink) to run SQL queries on the Kinesis stream in real-time."
+      },
+      {
+        "id": "B",
+        "text": "Load the stream into Amazon Redshift and run SQL queries."
+      },
+      {
+        "id": "C",
+        "text": "Use Amazon EMR with Spark Streaming to process the data."
+      },
+      {
+        "id": "D",
+        "text": "Store data in DynamoDB and run DynamoDB PartiQL queries."
+      }
+    ],
+    "correct": [
+      "A"
+    ],
+    "rationale": "A is correct because Amazon Kinesis Data Analytics (now Amazon Managed Service for Apache Flink) enables running SQL or Java/Python Flink applications on streaming Kinesis data in real-time with no infrastructure management. B (Redshift) requires batch loading; not real-time. C (EMR Spark Streaming) requires managing EMR clusters. D (DynamoDB) requires writing stream data to DynamoDB first and has no real-time stream SQL capability.",
+    "sourceUrl": "https://docs.aws.amazon.com/kinesisanalytics/latest/java/what-is.html",
+    "tags": [
+      "kinesis-analytics",
+      "streaming-sql",
+      "real-time",
+      "flink"
+    ]
+  },
+  {
+    "id": "m2-d3-q07",
+    "objective": "3.1",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company runs an application on EC2 that requires a boot volume with consistent IOPS for an OS with heavy random I/O. The instance needs 16,000 IOPS. Which EBS volume type meets this requirement at the lowest cost?",
+    "options": [
+      {
+        "id": "A",
+        "text": "gp3 with IOPS set to 16,000."
+      },
+      {
+        "id": "B",
+        "text": "io2 Block Express with 16,000 IOPS."
+      },
+      {
+        "id": "C",
+        "text": "st1 with 16,000 IOPS throughput."
+      },
+      {
+        "id": "D",
+        "text": "sc1 with maximum throughput."
+      }
+    ],
+    "correct": [
+      "A"
+    ],
+    "rationale": "A is correct because gp3 allows configuring up to 16,000 IOPS independently of volume size at a cost of /bin/zsh.005/provisioned IOPS above the baseline 3,000. This is significantly cheaper than io2 for the same IOPS. io2 charges /bin/zsh.065 per provisioned IOPS-month \u2014 approximately 13x more expensive per IOPS than gp3. st1 and sc1 are HDD types optimized for sequential throughput, not high-IOPS random I/O workloads.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html",
+    "tags": [
+      "ebs",
+      "gp3",
+      "iops",
+      "cost-optimization"
+    ]
+  },
+  {
+    "id": "m2-d3-q08",
+    "objective": "3.2",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a containerized API on ECS Fargate. Occasionally the API processes CPU-intensive computations that take 30 seconds. During these peaks, the API becomes unresponsive to health checks and is marked unhealthy. What change prevents this?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Increase the ECS service desired count to add more Fargate tasks."
+      },
+      {
+        "id": "B",
+        "text": "Offload the CPU-intensive computation to an SQS-backed Lambda worker and return a 202 Accepted immediately from the API."
+      },
+      {
+        "id": "C",
+        "text": "Increase the ALB health check timeout to 60 seconds."
+      },
+      {
+        "id": "D",
+        "text": "Use a larger Fargate task size with more vCPU."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because offloading heavy computation asynchronously (enqueue to SQS, return 202 Accepted) keeps the API responsive to health checks and user requests. The computation runs in a separate Lambda worker. A (more tasks) helps with concurrency but each task still blocks during the 30-second computation. C (longer health check timeout) hides the symptom but does not fix the blocking problem. D (larger Fargate) may reduce computation time but does not prevent blocking the request thread.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html",
+    "tags": [
+      "ecs",
+      "fargate",
+      "async",
+      "health-check"
+    ]
+  },
+  {
+    "id": "m2-d3-q09",
+    "objective": "3.4",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uses ALB with multiple target groups for path-based routing (/api/* to API servers, /static/* to EC2 static servers). They want to cache /static/* responses at the ALB layer to reduce backend load. Which component should be added?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Configure ALB sticky sessions for the static target group."
+      },
+      {
+        "id": "B",
+        "text": "Place a CloudFront distribution in front of the ALB and configure a Cache Behavior for /static/* with a 24-hour TTL."
+      },
+      {
+        "id": "C",
+        "text": "Enable ALB response caching in the listener rule configuration."
+      },
+      {
+        "id": "D",
+        "text": "Use ElastiCache Memcached in front of the static EC2 servers."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because ALB does not natively cache responses. CloudFront placed in front of the ALB caches /static/* content at edge locations worldwide, dramatically reducing backend load. A (sticky sessions) pins clients to specific targets but provides no caching. C is incorrect \u2014 ALB does not have response caching functionality. D (ElastiCache in front of EC2) requires application code changes to implement caching at the application layer.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-web-values-specify.html",
+    "tags": [
+      "cloudfront",
+      "alb",
+      "caching",
+      "path-routing"
+    ]
+  },
+  {
+    "id": "m2-d3-q10",
+    "objective": "3.3",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A data warehouse application needs to run complex analytical queries across petabytes of data. The queries involve large table scans with GROUP BY and aggregations across billions of rows. Which AWS database service is optimized for this workload?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Amazon Aurora PostgreSQL for its OLTP and OLAP hybrid capabilities."
+      },
+      {
+        "id": "B",
+        "text": "Amazon Redshift \u2014 a columnar MPP data warehouse for petabyte-scale analytics."
+      },
+      {
+        "id": "C",
+        "text": "Amazon DynamoDB with On-Demand capacity for flexible query patterns."
+      },
+      {
+        "id": "D",
+        "text": "Amazon RDS MySQL with partitioned tables for query performance."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Amazon Redshift is a fully managed, columnar massively parallel processing (MPP) data warehouse that excels at complex SQL analytical queries across petabytes of data. Columnar storage and parallel query execution make GROUP BY and aggregations across billions of rows extremely efficient. A (Aurora) is optimized for OLTP transactional workloads. C (DynamoDB) is a NoSQL key-value/document store without JOIN or complex aggregation support. D (RDS MySQL) is a row-oriented RDBMS that cannot efficiently scan billions of rows.",
+    "sourceUrl": "https://docs.aws.amazon.com/redshift/latest/mgmt/welcome.html",
+    "tags": [
+      "redshift",
+      "data-warehouse",
+      "olap",
+      "analytics"
+    ]
+  },
+  {
+    "id": "m2-d4-q04",
+    "objective": "4.4",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company serves users globally with a web application hosted in us-east-1. CloudFront is used to cache static content. The team notices data transfer costs between us-east-1 and CloudFront edge locations. What is the data transfer pricing model from an S3 origin to CloudFront?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Data transfer from S3 in us-east-1 to CloudFront in the same region is charged at the standard S3 data transfer rate."
+      },
+      {
+        "id": "B",
+        "text": "Data transfer from S3 to CloudFront within the same AWS region is free."
+      },
+      {
+        "id": "C",
+        "text": "Data transfer from S3 to CloudFront is charged based on the number of CloudFront requests."
+      },
+      {
+        "id": "D",
+        "text": "Data transfer from S3 to CloudFront costs /bin/zsh.09/GB regardless of region."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because AWS does not charge for data transferred from an Amazon S3 bucket to a CloudFront distribution when both are in the same AWS region. This is a significant cost benefit \u2014 only CloudFront-to-internet charges and request fees apply. A is incorrect \u2014 same-region S3 to CloudFront is free. C (per request) is incorrect \u2014 the pricing model is per GB transferred and per request, not based on transfer being charged per request. D is incorrect \u2014 same-region S3 to CloudFront is free.",
+    "sourceUrl": "https://aws.amazon.com/cloudfront/pricing/",
+    "tags": [
+      "cloudfront",
+      "s3",
+      "data-transfer",
+      "free-tier"
+    ]
+  },
+  {
+    "id": "m2-d4-q05",
+    "objective": "4.2",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs hundreds of short-lived Lambda functions averaging 200ms execution and 256 MB memory. They execute 50 million times per month. The team wants to review if they are within the Lambda free tier or should commit to a pricing model. What is the monthly Lambda charge after free tier?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Lambda charges per provisioned concurrency unit regardless of invocations."
+      },
+      {
+        "id": "B",
+        "text": "Lambda charges /bin/zsh.20 per 1M requests and /bin/zsh.0000166667 per GB-second after the free tier of 1M requests and 400,000 GB-seconds per month."
+      },
+      {
+        "id": "C",
+        "text": "Lambda is always free up to 10 million requests per month."
+      },
+      {
+        "id": "D",
+        "text": "Lambda charges a flat monthly fee based on deployed function size."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct. Lambda pricing consists of: (1) /bin/zsh.20 per 1 million requests after the first 1M free per month, and (2) /bin/zsh.0000166667 per GB-second of compute after the first 400,000 GB-seconds free per month. For 50 million invocations at 200ms/256MB: compute = 50M \u00d7 0.2s \u00d7 0.25GB = 2.5M GB-seconds. After 400K free: ~2.1M GB-seconds \u00d7 /bin/zsh.0000166667 \u2248 . Requests: (50M - 1M) \u00d7 /bin/zsh.20/1M = .80. Total \u2248 /month. A (provisioned concurrency) is optional and separate. C is incorrect \u2014 the free tier is 1M requests/month. D (flat fee) is not how Lambda pricing works.",
+    "sourceUrl": "https://aws.amazon.com/lambda/pricing/",
+    "tags": [
+      "lambda",
+      "pricing",
+      "cost-calculation",
+      "free-tier"
+    ]
+  },
+  {
+    "id": "m2-d4-q06",
+    "objective": "4.1",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company has S3 buckets with millions of incomplete multipart uploads accumulating over months, contributing significantly to storage costs. What is the MOST cost-effective way to address this?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Manually identify and delete incomplete multipart uploads using the AWS CLI."
+      },
+      {
+        "id": "B",
+        "text": "Configure an S3 Lifecycle rule to automatically abort incomplete multipart uploads after a specified number of days."
+      },
+      {
+        "id": "C",
+        "text": "Enable S3 Versioning to track and clean up incomplete uploads."
+      },
+      {
+        "id": "D",
+        "text": "Switch to S3 Standard-IA to reduce storage costs for incomplete uploads."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because S3 Lifecycle rules support an AbortIncompleteMultipartUpload action that automatically deletes multipart upload parts older than a specified number of days (e.g., 7 days). This is a zero-cost, automated solution. A (manual CLI cleanup) requires ongoing operational effort. C (Versioning) tracks object versions but does not clean up incomplete multipart uploads. D (Standard-IA) reduces storage cost but the uploads are still charged for storage.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html#mpu-abort-incomplete-mpu-lifecycle-config",
+    "tags": [
+      "s3",
+      "multipart-upload",
+      "lifecycle",
+      "cost-optimization"
+    ]
+  },
+  {
+    "id": "m2-d4-q07",
+    "objective": "4.3",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company runs RDS Aurora MySQL with automated backups configured for 35-day retention. After reviewing costs, they find backup storage charges are very high. What is the maximum retention period for RDS automated backups, and what happens to backup storage costs?",
+    "options": [
+      {
+        "id": "A",
+        "text": "RDS supports up to 35 days of automated backup retention. Backup storage equal to the DB size is included free."
+      },
+      {
+        "id": "B",
+        "text": "RDS supports up to 35 days. All backup storage is charged per GB regardless of DB size."
+      },
+      {
+        "id": "C",
+        "text": "RDS supports up to 7 days only. Longer retention requires manual snapshots."
+      },
+      {
+        "id": "D",
+        "text": "RDS supports unlimited retention with S3 Glacier archiving at no extra cost."
+      }
+    ],
+    "correct": [
+      "A"
+    ],
+    "rationale": "A is correct. RDS supports 1\u201335 days of automated backup retention. AWS provides free backup storage equal to the total provisioned database storage size per region (e.g., a 100 GB DB gets 100 GB of backup storage free per month). Backup storage exceeding the provisioned DB size is charged at /bin/zsh.095/GB-month. To reduce costs, reduce the retention period to the minimum required (e.g., 7 days if compliance allows), which reduces the total backup data retained. C is incorrect \u2014 retention goes up to 35 days. D is incorrect \u2014 unlimited retention is not supported for automated backups.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html",
+    "tags": [
+      "rds",
+      "automated-backup",
+      "retention",
+      "cost"
+    ]
+  },
+  {
+    "id": "m2-d4-q08",
+    "objective": "4.2",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uses AWS Fargate for all containerized workloads. Their Cost Explorer shows Fargate accounts for 40% of monthly AWS spend. The workload is a mix of steady-state APIs and batch jobs. What combination of Fargate pricing options reduces costs most effectively?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Use Fargate On-Demand for all workloads \u2014 Fargate pricing is already optimized."
+      },
+      {
+        "id": "B",
+        "text": "Use Compute Savings Plans to cover steady-state API Fargate usage and Fargate Spot for batch jobs."
+      },
+      {
+        "id": "C",
+        "text": "Migrate all batch jobs to EC2 Spot Instances managed by Auto Scaling."
+      },
+      {
+        "id": "D",
+        "text": "Use Fargate Reserved Capacity for the steady-state APIs."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Compute Savings Plans apply to Fargate vCPU and memory usage (up to 50% savings for 1-year commitment) for predictable steady-state API workloads, while Fargate Spot (up to 70% savings) handles batch jobs that can tolerate interruption. This two-tier strategy covers both usage patterns optimally. A (On-Demand) is the baseline \u2014 most expensive. C (EC2 Spot for batch) requires managing EC2 instances. D \u2014 Fargate does not have Reserved Capacity; Compute Savings Plans are the equivalent mechanism.",
+    "sourceUrl": "https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html",
+    "tags": [
+      "fargate",
+      "savings-plans",
+      "fargate-spot",
+      "cost-optimization"
+    ]
+  },
+  {
+    "id": "m2-d4-q09",
+    "objective": "4.4",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company has EC2 instances and RDS databases in the same VPC in us-east-1. Network traffic between EC2 and RDS stays within the VPC. The team notices unexpected data transfer charges between the EC2 instances and RDS. What is the LIKELY cause?",
+    "options": [
+      {
+        "id": "A",
+        "text": "EC2 to RDS traffic within the same VPC and same Availability Zone is always free."
+      },
+      {
+        "id": "B",
+        "text": "EC2 and RDS are in different Availability Zones within the same region, incurring cross-AZ data transfer charges (/bin/zsh.01/GB each direction)."
+      },
+      {
+        "id": "C",
+        "text": "VPC traffic is charged per packet regardless of AZ placement."
+      },
+      {
+        "id": "D",
+        "text": "RDS always charges for data transfer regardless of source."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because AWS charges /bin/zsh.01/GB for data transferred between EC2 instances or services in different Availability Zones within the same region, even within the same VPC. If the EC2 instances are in us-east-1a and RDS is in us-east-1b (e.g., Multi-AZ standby promotion), cross-AZ charges apply. To minimize this, ensure EC2 instances and the RDS primary instance are in the same AZ (at the cost of single-AZ resilience) or accept the cost for Multi-AZ benefit. A is only true for same-AZ traffic. C is incorrect \u2014 intra-VPC traffic within the same AZ is free. D is incorrect \u2014 RDS data transfer within the same AZ and to EC2 in the same AZ is free.",
+    "sourceUrl": "https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer",
+    "tags": [
+      "cross-az",
+      "data-transfer",
+      "cost",
+      "vpc"
+    ]
+  },
+  {
+    "id": "m2-d4-q10",
+    "objective": "4.1",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a large EFS file system (50 TB) with Bursting throughput mode. As the file system grows, burst credits are exhausted quickly and throughput drops to the baseline. The team experiences performance issues. What is the MOST cost-effective change that maintains performance?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Switch to EFS Provisioned Throughput mode and provision the required MiB/s."
+      },
+      {
+        "id": "B",
+        "text": "Add more data to the file system to earn more burst credits."
+      },
+      {
+        "id": "C",
+        "text": "Switch to EFS Elastic Throughput mode which automatically scales throughput up and down based on workload, paying only for throughput used."
+      },
+      {
+        "id": "D",
+        "text": "Move to an EFS One Zone file system which has higher baseline throughput."
+      }
+    ],
+    "correct": [
+      "C"
+    ],
+    "rationale": "C is correct because EFS Elastic Throughput automatically scales throughput to meet workload needs (up to 3 GiB/s for reads, 1 GiB/s for writes per file system) and charges only for throughput consumed above the included amount. For bursty workloads that occasionally need high throughput, Elastic mode eliminates the burst credit exhaustion problem without paying for continuously provisioned throughput. A (Provisioned Throughput) guarantees a fixed MiB/s and is cost-effective for consistently high throughput needs but more expensive for bursty workloads. B (adding data) earns more burst credits but does not solve sustained throughput needs. D (One Zone) does not have inherently higher throughput and reduces durability.",
+    "sourceUrl": "https://docs.aws.amazon.com/efs/latest/ug/performance.html#throughput-modes",
+    "tags": [
+      "efs",
+      "elastic-throughput",
+      "burst-credits",
+      "cost-optimization"
+    ]
+  },
+  {
+    "id": "m2-d3-q11",
+    "objective": "3.2",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a Node.js API on Lambda. The function connects to an RDS database and takes 800ms to initialize the database connection on cold starts. Subsequent warm invocations take 50ms. Which approach reduces cold start latency without using Provisioned Concurrency?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Initialize the database connection inside the Lambda handler function on every invocation."
+      },
+      {
+        "id": "B",
+        "text": "Initialize the database connection in the Lambda initialization code (outside the handler) so it is reused across warm invocations."
+      },
+      {
+        "id": "C",
+        "text": "Increase Lambda memory to 3 GB to speed up the Node.js runtime initialization."
+      },
+      {
+        "id": "D",
+        "text": "Use Lambda Layers to pre-package the database driver for faster loading."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because code placed outside the Lambda handler in the initialization scope (module-level code) runs once during cold start and the results (including database connection objects) are reused across warm invocations. This is the standard pattern for connection reuse in Lambda. A (inside the handler) creates a new connection on every invocation, wasting 800ms every time. C (more memory) speeds up CPU-bound initialization slightly but the 800ms is network I/O for the DB connection \u2014 memory does not help. D (Layers) reduces zip file size but does not help with runtime database connection initialization.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html",
+    "tags": [
+      "lambda",
+      "cold-start",
+      "connection-reuse",
+      "initialization"
+    ]
+  },
+  {
+    "id": "m2-d3-q12",
+    "objective": "3.4",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company uses an ALB with an EC2-based backend. They need to route requests to different backend services based on request headers (e.g., X-API-Version: v2 should route to a new service version). Which ALB feature supports this?",
+    "options": [
+      {
+        "id": "A",
+        "text": "ALB host-based routing rules."
+      },
+      {
+        "id": "B",
+        "text": "ALB HTTP header-based routing conditions in listener rules."
+      },
+      {
+        "id": "C",
+        "text": "ALB IP-based routing using security groups."
+      },
+      {
+        "id": "D",
+        "text": "ALB weighted target groups."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because ALB listener rules support conditions based on HTTP headers (including custom headers like X-API-Version). When the header matches, the request is forwarded to the specified target group. A (host-based routing) routes based on the Host header (domain name), not custom headers. C (IP-based routing with security groups) is not an ALB routing feature. D (weighted target groups) distributes traffic proportionally but cannot inspect header content for routing decisions.",
+    "sourceUrl": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-listeners.html#rule-condition-types",
+    "tags": [
+      "alb",
+      "header-routing",
+      "listener-rule",
+      "http"
+    ]
+  },
+  {
+    "id": "m2-d3-q13",
+    "objective": "3.3",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company migrates a MySQL database to AWS. The application performs 80% writes and 20% reads. Write throughput is the primary concern. The schema changes frequently due to agile development. Which AWS database option best addresses these requirements?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Amazon RDS MySQL Multi-AZ for high write availability."
+      },
+      {
+        "id": "B",
+        "text": "Amazon Aurora MySQL \u2014 uses a distributed storage engine with 6-way replication optimized for write throughput and supports online DDL without table locks."
+      },
+      {
+        "id": "C",
+        "text": "Amazon DynamoDB for maximum write throughput."
+      },
+      {
+        "id": "D",
+        "text": "Amazon RDS MySQL with Provisioned IOPS (io2) volumes."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Aurora MySQL stores data in a distributed storage volume across 6 nodes in 3 AZs with redo log-based replication. This allows Aurora to complete writes after 4/6 storage nodes acknowledge, with high write throughput. Aurora also supports online DDL (schema changes) using pt-online-schema-change-like techniques without blocking writes. A (RDS MySQL Multi-AZ) has lower write throughput than Aurora due to synchronous binary log replication. C (DynamoDB) requires schema migration from SQL. D (RDS with io2) improves I/O throughput but Aurora's storage architecture provides fundamentally better write performance.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.StorageReliability.html",
+    "tags": [
+      "aurora",
+      "write-throughput",
+      "mysql",
+      "storage-architecture"
+    ]
+  },
+  {
+    "id": "m2-d3-q14",
+    "objective": "3.1",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company needs to migrate 80 TB of on-premises data to S3 over a 1 Gbps internet connection. At full utilization, this would take over 7 days and disrupt internet operations. Which AWS service enables offline data migration at petabyte scale?",
+    "options": [
+      {
+        "id": "A",
+        "text": "AWS DataSync over the existing internet connection."
+      },
+      {
+        "id": "B",
+        "text": "AWS Snowball Edge Storage Optimized device to transfer data offline and ship to AWS."
+      },
+      {
+        "id": "C",
+        "text": "S3 Transfer Acceleration to speed up the upload."
+      },
+      {
+        "id": "D",
+        "text": "AWS Storage Gateway to cache data locally and upload incrementally."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because AWS Snowball Edge is a physical petabyte-scale data transfer device. An 80 TB Snowball Edge device is shipped to the company, data is copied locally at high speed, and the device is shipped back to AWS for ingestion into S3 \u2014 bypassing the internet connection entirely. A (DataSync) transfers data over the internet \u2014 still limited by the 1 Gbps connection. C (Transfer Acceleration) improves upload speed but does not avoid the internet bottleneck. D (Storage Gateway) is for hybrid cloud storage, not bulk migration.",
+    "sourceUrl": "https://docs.aws.amazon.com/snowball/latest/developer-guide/whatissnowball.html",
+    "tags": [
+      "snowball",
+      "data-migration",
+      "offline",
+      "large-dataset"
+    ]
+  },
+  {
+    "id": "m2-d3-q15",
+    "objective": "3.2",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs batch genomics analysis jobs using AWS Batch. Jobs require 96 vCPU and 384 GB RAM each and run for 8\u201312 hours. The team wants to minimize the per-job compute cost. Which EC2 instance family is MOST appropriate for this memory-optimized HPC workload?",
+    "options": [
+      {
+        "id": "A",
+        "text": "c5 (Compute Optimized) instances for maximum vCPU performance."
+      },
+      {
+        "id": "B",
+        "text": "r6g (Memory Optimized, Graviton2) instances for best price-performance on memory-intensive workloads."
+      },
+      {
+        "id": "C",
+        "text": "p3 (GPU) instances for parallel genomics computation."
+      },
+      {
+        "id": "D",
+        "text": "i3 (Storage Optimized) instances for NVMe local storage."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because the r6g family (Graviton2 ARM-based) provides up to 20% better price-performance than x86 equivalents for memory-intensive workloads. At 384 GB RAM requirement, the r-family (memory optimized) is the right choice, and Graviton2 reduces cost per GB-hour. A (c5) is compute-optimized with less RAM per vCPU \u2014 not suited for 384 GB memory requirements. C (p3) provides GPU compute which is not needed for standard genomics sequence alignment. D (i3) is storage-optimized for NVMe workloads, not memory-intensive batch analysis.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/memory-optimized-instances.html",
+    "tags": [
+      "ec2",
+      "graviton",
+      "memory-optimized",
+      "batch"
+    ]
+  },
+  {
+    "id": "m2-d4-q11",
+    "objective": "4.1",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company stores application logs in CloudWatch Logs. After 90 days, logs are rarely accessed but must be retained for 2 years for compliance. CloudWatch Logs charges for storage are accumulating. What is the MOST cost-effective approach?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Delete logs after 90 days and rely on EC2 instance logs for compliance."
+      },
+      {
+        "id": "B",
+        "text": "Export CloudWatch Logs to S3 after 90 days using a CloudWatch Logs export task, then apply an S3 Lifecycle rule to move to Glacier after export."
+      },
+      {
+        "id": "C",
+        "text": "Increase the CloudWatch Logs retention period to 2 years \u2014 there is no charge for longer retention."
+      },
+      {
+        "id": "D",
+        "text": "Use CloudWatch Logs Insights to compress and reduce log data automatically."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because CloudWatch Logs storage costs /bin/zsh.03/GB/month. Exporting logs to S3 after 90 days and transitioning to Glacier (/bin/zsh.004/GB/month) or Glacier Deep Archive (/bin/zsh.00099/GB/month) reduces storage costs by up to 97%. A (deleting) violates the 2-year compliance requirement. C is incorrect \u2014 CloudWatch Logs charges for all stored data; longer retention increases cost. D (Logs Insights) is a query tool; it does not compress stored logs.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/S3ExportTasksConsole.html",
+    "tags": [
+      "cloudwatch-logs",
+      "s3",
+      "glacier",
+      "cost-optimization"
+    ]
+  },
+  {
+    "id": "m2-d4-q12",
+    "objective": "4.2",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company uses AWS Cost Explorer and notices that NAT Gateway data processing charges account for 15% of their total AWS bill. EC2 instances in private subnets heavily access both S3 and DynamoDB through the NAT Gateway. What is the SINGLE BEST action to eliminate the majority of these NAT Gateway charges?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Replace NAT Gateway with a NAT Instance to reduce data processing fees."
+      },
+      {
+        "id": "B",
+        "text": "Create VPC Gateway Endpoints for both S3 and DynamoDB, and update the VPC route table."
+      },
+      {
+        "id": "C",
+        "text": "Enable S3 Transfer Acceleration to bypass the NAT Gateway for S3 traffic."
+      },
+      {
+        "id": "D",
+        "text": "Move EC2 instances to a public subnet so they bypass the NAT Gateway."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because VPC Gateway Endpoints for S3 and DynamoDB are free and route traffic directly within the AWS network, bypassing the NAT Gateway entirely. Since S3 and DynamoDB are likely the largest contributors to NAT Gateway traffic, both endpoints together should eliminate the majority of NAT charges. A (NAT Instance) also incurs data processing charges and adds management overhead. C (Transfer Acceleration) increases, not decreases, costs. D (public subnet) exposes EC2 instances to the internet, violating security requirements.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-ddb.html",
+    "tags": [
+      "vpc-endpoint",
+      "nat-gateway",
+      "s3",
+      "dynamodb"
+    ]
+  },
+  {
+    "id": "m2-d4-q13",
+    "objective": "4.3",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company is running Amazon Redshift for their data warehouse. After reviewing costs, they find that 70% of query time is spent on large table scans of historical data (2+ years old) that is rarely queried. What Redshift feature reduces storage and query costs for historical data?",
+    "options": [
+      {
+        "id": "A",
+        "text": "Enable Redshift Concurrency Scaling for historical queries."
+      },
+      {
+        "id": "B",
+        "text": "Use Redshift Spectrum to store historical data in S3 and query it directly without loading into Redshift."
+      },
+      {
+        "id": "C",
+        "text": "Export historical data to DynamoDB for cheaper storage."
+      },
+      {
+        "id": "D",
+        "text": "Archive historical data to S3 Glacier Deep Archive and only restore when needed."
+      }
+    ],
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Redshift Spectrum enables querying data stored in S3 directly from Redshift using external tables. Historical data (2+ years) can be unloaded from Redshift to S3 (using S3 Standard-IA or Glacier for older partitions), significantly reducing Redshift node storage requirements and costs. Spectrum queries charge per TB scanned in S3 (/TB) \u2014 much cheaper than keeping the data in Redshift nodes. A (Concurrency Scaling) adds additional cluster capacity for concurrent queries \u2014 not a cost reduction for historical data. C (DynamoDB) is not suited for analytical SQL queries. D (Glacier) cannot be queried by Redshift Spectrum directly.",
+    "sourceUrl": "https://docs.aws.amazon.com/redshift/latest/dg/c-using-spectrum.html",
+    "tags": [
+      "redshift",
+      "redshift-spectrum",
+      "s3",
+      "cost-optimization"
+    ]
   }
 ]
