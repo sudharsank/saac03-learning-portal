@@ -5,6 +5,385 @@ domain: 4
 weight: "Medium"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 4.1 — Cost-Optimized Storage Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+AWS offers a spectrum of storage services — S3, EBS, EFS, Glacier — each with multiple pricing tiers designed for different access patterns and durability requirements. Cost-optimized storage means matching the **retrieval frequency** of your data to the **cheapest storage class that still meets your SLA**, then automating transitions over time with lifecycle policies.
+
+S3 alone has seven storage classes ranging from $0.023/GB/month (Standard) down to $0.00099/GB/month (Deep Archive), a 23x price difference. Choosing the wrong class for cold data is one of the most common sources of avoidable AWS spend. Similarly, EBS defaults to gp2 for many workloads even though gp3 delivers the same or better performance at 20% lower cost.
+
+Effective storage cost management requires three skills: selecting the right storage class at object creation, configuring lifecycle rules to transition or expire objects automatically, and right-sizing block and file storage volumes. Together, these can reduce storage bills by 50–80% on data-heavy workloads.
+
+## Key Components
+
+- **S3 Storage Classes** — Standard, Intelligent-Tiering, Standard-IA, One Zone-IA, Glacier Instant Retrieval, Glacier Flexible Retrieval, Glacier Deep Archive
+- **S3 Lifecycle Policies** — Transition rules (move to cheaper class), expiration rules (delete objects), multipart upload cleanup
+- **S3 Intelligent-Tiering** — Automatic tiering with small per-object monitoring fee; no retrieval charges
+- **EBS Volume Types** — gp3 (general purpose), io2 (provisioned IOPS), sc1/st1 (throughput-optimized HDD)
+- **EBS Snapshot Lifecycle Manager (DLM)** — Automated snapshot creation and deletion policies
+- **EFS Storage Classes** — Standard + Infrequent Access (IA) tiers with lifecycle management
+- **S3 Requester Pays** — Transfers cost billed to the requester, not the bucket owner
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### S3 Storage Class Pricing Tiers
+
+S3 storage classes form a cost-vs-availability spectrum. Understanding the trade-offs is the foundation of cost-optimized storage design:
+
+| Storage Class | $/GB/month | Min Duration | Retrieval Fee | Use Case |
+|---|---|---|---|---|
+| Standard | $0.023 | None | None | Frequently accessed data |
+| Intelligent-Tiering | $0.023 (active) | None | None | Unknown access patterns |
+| Standard-IA | $0.0125 | 30 days | Per GB | Infrequent but fast retrieval |
+| One Zone-IA | $0.01 | 30 days | Per GB | Non-critical, re-creatable |
+| Glacier Instant | $0.004 | 90 days | Per GB | Archives needing ms retrieval |
+| Glacier Flexible | $0.0036 | 90 days | Per GB + request | Archives with hours retrieval |
+| Deep Archive | $0.00099 | 180 days | Per GB + request | Long-term compliance archives |
+
+**Minimum storage duration** means if you store an object for less than the minimum and then delete or transition it, you are still charged for the full minimum period. This is a significant cost trap for small or short-lived objects.
+
+### S3 Intelligent-Tiering
+
+Intelligent-Tiering monitors object-level access and automatically moves objects between an **Frequent Access** tier (Standard pricing) and an **Infrequent Access** tier (Standard-IA pricing) after 30 days of no access. For objects not accessed for 90 days, it can optionally move them to the **Archive Instant Access** tier.
+
+The cost model:
+- **Monitoring fee**: $0.0025 per 1,000 objects monitored per month
+- **No retrieval charges**: Unlike Standard-IA, there is no per-GB retrieval fee regardless of which internal tier the object is in
+- **Break-even**: If 40%+ of objects in a Standard-IA bucket go unaccessed for 30 days, Intelligent-Tiering pays off
+
+Intelligent-Tiering is best for buckets with mixed or unpredictable access patterns — for example, user-generated content where some files are accessed constantly and others are never touched again.
+
+### S3 Lifecycle Policies
+
+Lifecycle rules automate cost management without application changes. A lifecycle configuration is a set of rules attached to a bucket, each with a filter (prefix, tags, object size) and one or more actions:
+
+**Transition actions** move objects to a cheaper storage class after a specified number of days since object creation. Transition hierarchy (you can only go down, never up via lifecycle):
+
+```
+Standard → Standard-IA (min 30 days) → Glacier Instant (min 90 days) → Glacier Flexible → Deep Archive
+```
+
+**Expiration actions** delete objects automatically. Useful for:
+- Log files (expire after 90 days)
+- Temporary upload staging directories
+- Old application versions
+
+**Multipart upload cleanup**: Large files uploaded in parts leave behind incomplete multipart uploads if the upload fails. These consume storage without creating usable objects. A lifecycle rule with `AbortIncompleteMultipartUpload` after 7 days prevents this silent cost accumulation.
+
+**Example lifecycle strategy for logs**:
+```
+Day 0: Write to Standard
+Day 30: Transition to Standard-IA
+Day 90: Transition to Glacier Flexible Retrieval
+Day 365: Expire (delete)
+```
+
+### EBS Cost Optimization
+
+EBS volumes are billed per GB-month provisioned (regardless of use) plus per IOPS provisioned (for io1/io2). Key cost levers:
+
+**gp3 vs gp2**:
+- gp2: IOPS tied to volume size (3 IOPS/GB, max 16,000 IOPS at 5,333 GB)
+- gp3: Baseline 3,000 IOPS and 125 MB/s included free, independently scalable up to 16,000 IOPS and 1,000 MB/s
+- gp3 is $0.08/GB/month vs gp2 at $0.10/GB/month — 20% cheaper at the same size
+- For a 1TB volume needing 3,000 IOPS: gp2 = $100/month, gp3 = $80/month
+
+**EBS Snapshot Lifecycle Manager (DLM)**:
+- Automates creation, retention, and deletion of EBS snapshots
+- Snapshots are incremental — only changed blocks cost money after the first snapshot
+- DLM can tag snapshots and enforce retention windows (e.g., keep last 7 daily + 4 weekly + 12 monthly)
+- Orphaned snapshots (the source volume was deleted) are a common source of waste — DLM helps prevent accumulation
+
+**Delete on Termination**:
+- EC2 root volumes have `DeleteOnTermination=true` by default — good
+- Additional EBS volumes default to `DeleteOnTermination=false` — change this for ephemeral volumes to avoid orphaned volumes
+
+**Unused volumes**: Detached EBS volumes still incur the full provisioned storage charge. AWS Trusted Advisor flags unattached volumes.
+
+### EFS Cost Optimization
+
+EFS Standard is ~$0.30/GB/month — significantly more expensive than S3. EFS Infrequent Access (IA) is $0.025/GB/month with a $0.01/GB retrieval fee.
+
+EFS lifecycle management moves files that have not been accessed for a configurable period (1 day to 90 days) to the IA storage class automatically. Enabling this for a typical file share where 80% of files are accessed rarely can reduce EFS bills by 50–70%.
+
+### S3 Requester Pays
+
+When a bucket is configured with Requester Pays, the AWS account making the GET/PUT request is charged for data transfer costs, not the bucket owner. This is useful for distributing large public datasets (e.g., genomics datasets, satellite imagery) where the data owner does not want to absorb egress costs. Requesters must authenticate with AWS credentials — anonymous access is disabled in Requester Pays mode.
+
+## Decision Flow
+
+### Which S3 storage class?
+
+```
+Unknown or mixed access patterns?
+  → Intelligent-Tiering (no retrieval fee risk)
+
+Known access frequency:
+  Accessed multiple times/month?
+    → Standard
+  Accessed <1x/month, needs ms retrieval?
+    → Standard-IA (must tolerate 30-day minimum)
+  Is the data re-creatable if AZ fails?
+    → One Zone-IA (20% cheaper than Standard-IA)
+  Archive that needs ms retrieval?
+    → Glacier Instant Retrieval
+  Archive with minutes/hours retrieval OK?
+    → Glacier Flexible Retrieval
+  Compliance archive, retrieval in hours?
+    → Glacier Deep Archive (cheapest)
+```
+
+### gp2 or gp3 for EBS?
+
+Always prefer gp3 for new volumes and migrate existing gp2 volumes. gp3 is cheaper and more flexible — there is no scenario where gp2 is preferable to gp3 unless a legacy application has a hard dependency on gp2 behavior.
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create an S3 Lifecycle Policy (CLI)
+
+```bash
+# Create a lifecycle configuration JSON file
+cat > lifecycle.json << 'EOF'
+{
+  "Rules": [
+    {
+      "ID": "log-archival-rule",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "logs/" },
+      "Transitions": [
+        { "Days": 30,  "StorageClass": "STANDARD_IA" },
+        { "Days": 90,  "StorageClass": "GLACIER" },
+        { "Days": 365, "StorageClass": "DEEP_ARCHIVE" }
+      ],
+      "Expiration": { "Days": 730 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}
+EOF
+
+# Apply lifecycle policy to a bucket
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket my-app-logs-bucket \
+  --lifecycle-configuration file://lifecycle.json
+
+# Verify the policy was applied
+aws s3api get-bucket-lifecycle-configuration \
+  --bucket my-app-logs-bucket
+```
+
+### Enable S3 Intelligent-Tiering on a Bucket
+
+```bash
+# Enable Intelligent-Tiering configuration with Archive tier after 90 days
+aws s3api put-bucket-intelligent-tiering-configuration \
+  --bucket my-content-bucket \
+  --id "FullTieringConfig" \
+  --intelligent-tiering-configuration '{
+    "Id": "FullTieringConfig",
+    "Status": "Enabled",
+    "Tierings": [
+      { "Days": 90, "AccessTier": "ARCHIVE_INSTANT_ACCESS" },
+      { "Days": 180, "AccessTier": "DEEP_ARCHIVE_ACCESS" }
+    ]
+  }'
+
+# Check the configuration
+aws s3api get-bucket-intelligent-tiering-configuration \
+  --bucket my-content-bucket \
+  --id "FullTieringConfig"
+```
+
+### Migrate gp2 EBS Volume to gp3
+
+```bash
+# List EBS volumes that are gp2
+aws ec2 describe-volumes \
+  --filters Name=volume-type,Values=gp2 \
+  --query 'Volumes[*].{ID:VolumeId,Size:Size,IOPS:Iops,State:State}' \
+  --output table
+
+# Modify a volume from gp2 to gp3 (live, no downtime)
+aws ec2 modify-volume \
+  --volume-id vol-0123456789abcdef0 \
+  --volume-type gp3 \
+  --iops 3000 \
+  --throughput 125
+
+# Monitor the modification progress
+aws ec2 describe-volumes-modifications \
+  --volume-ids vol-0123456789abcdef0 \
+  --query 'VolumesModifications[*].{State:ModificationState,Progress:Progress}'
+```
+
+### Create an EBS DLM Snapshot Policy
+
+```bash
+# Create an IAM role for DLM (if not already present)
+aws iam create-role \
+  --role-name AWSDataLifecycleManagerDefaultRole \
+  --assume-role-policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[{"Effect":"Allow","Principal":{"Service":"dlm.amazonaws.com"},"Action":"sts:AssumeRole"}]
+  }'
+
+aws iam attach-role-policy \
+  --role-name AWSDataLifecycleManagerDefaultRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+# Create a snapshot lifecycle policy
+aws dlm create-lifecycle-policy \
+  --description "Daily snapshots, 7-day retention" \
+  --state ENABLED \
+  --execution-role-arn arn:aws:iam::123456789012:role/AWSDataLifecycleManagerDefaultRole \
+  --policy-details '{
+    "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",
+    "ResourceTypes": ["VOLUME"],
+    "TargetTags": [{"Key":"Backup","Value":"true"}],
+    "Schedules": [{
+      "Name": "Daily",
+      "CreateRule": {"Interval": 24, "IntervalUnit": "HOURS", "Times": ["03:00"]},
+      "RetainRule": {"Count": 7},
+      "CopyTags": true
+    }]
+  }'
+```
+
+### Find and Alert on Unused EBS Volumes
+
+```bash
+# List all detached EBS volumes (you are paying for these but they are not in use)
+aws ec2 describe-volumes \
+  --filters Name=status,Values=available \
+  --query 'Volumes[*].{ID:VolumeId,Size:Size,Type:VolumeType,Created:CreateTime}' \
+  --output table
+
+# Delete a specific unused volume (CAUTION: irreversible)
+# aws ec2 delete-volume --volume-id vol-0123456789abcdef0
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Intelligent-Tiering vs Standard-IA for unknown patterns**: Intelligent-Tiering has no retrieval fee, making it safer when access patterns are unpredictable. Standard-IA charges per-GB retrieval, so it can cost more than Standard if data is accessed frequently.
+- **Lifecycle transition direction**: Lifecycle policies can only transition objects to cheaper (colder) storage classes. You cannot create a lifecycle rule to move an object from Glacier back to Standard — you must use a Restore operation and then re-upload.
+- **Minimum storage duration billing**: Storing an object for 10 days in Standard-IA and then deleting it still charges you for 30 days. The exam will present scenarios where this makes Standard cheaper for short-lived objects.
+- **One Zone-IA risk**: 20% cheaper than Standard-IA but data is destroyed if that single AZ fails. Only appropriate for data that can be re-created or re-fetched from another source.
+- **gp3 migration**: The exam increasingly expects you to recommend gp3 over gp2 for new and existing workloads. gp3 is always cheaper and has better baseline IOPS included.
+
+## Common Traps
+
+- **Forgetting multipart upload cleanup**: Large S3 buckets with frequent uploads accumulate failed multipart uploads. Without an `AbortIncompleteMultipartUpload` lifecycle rule, these invisible partial uploads continuously accrue storage charges.
+- **Confusing Glacier Restore with Lifecycle**: A Lifecycle rule can move an object from Standard to Glacier, but once in Glacier, a Lifecycle rule cannot move it back. A temporary Restore makes a Standard copy available for a specified number of days, but the original stays in Glacier.
+- **Deep Archive minimum duration**: Objects stored in Deep Archive are billed for a minimum of 180 days. Using Deep Archive for data that is deleted or transitioned before 180 days results in higher costs, not lower.
+</ExamAngle>
+
+<Flashcard front="What is the minimum storage duration for S3 Standard-IA?" back="30 days. Deleting or transitioning an object before 30 days still incurs a charge for the full 30-day minimum." />
+<Flashcard front="Why use S3 Intelligent-Tiering instead of Standard-IA for unpredictable access?" back="Intelligent-Tiering has no per-GB retrieval fee. If access patterns are unknown and some objects turn out to be frequently accessed, Intelligent-Tiering avoids surprise retrieval charges that would make it more expensive than Standard." />
+<Flashcard front="What is the cost advantage of EBS gp3 over gp2?" back="gp3 costs 20% less per GB ($0.08 vs $0.10/GB/month), includes 3,000 IOPS and 125 MB/s baseline at no extra charge, and allows IOPS and throughput to be set independently of volume size." />
+<Flashcard front="What does S3 Requester Pays do?" back="Shifts data transfer and request costs to the requester (the AWS account downloading the data) instead of the bucket owner. Requires requesters to authenticate with AWS credentials." />
+<Flashcard front="What lifecycle action prevents silent cost accumulation from failed large uploads?" back="AbortIncompleteMultipartUpload — a lifecycle rule that automatically deletes incomplete multipart upload parts after a specified number of days." />
+
+{/* QUIZ
+[
+  {
+    "id": "d4-1-q01",
+    "objective": "4.1 — Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company stores user-uploaded media files in S3. Files are accessed frequently for the first two weeks after upload, then rarely accessed afterward. The access pattern after the initial period is unpredictable — some files are never accessed again, others are requested occasionally. Which storage strategy minimizes cost while eliminating retrieval fee risk?",
+    "options": [
+      { "id": "A", "text": "Transition to Standard-IA after 30 days using a lifecycle rule" },
+      { "id": "B", "text": "Transition to S3 Intelligent-Tiering after 30 days using a lifecycle rule" },
+      { "id": "C", "text": "Transition to Glacier Flexible Retrieval after 30 days using a lifecycle rule" },
+      { "id": "D", "text": "Keep all objects in S3 Standard to avoid any retrieval fees" }
+    ],
+    "correct": ["B"],
+    "rationale": "Intelligent-Tiering automatically moves objects between Frequent and Infrequent Access tiers based on actual access patterns, with no retrieval fee regardless of which tier an object is in. Standard-IA (A) charges a per-GB retrieval fee, which can exceed Standard pricing if objects are accessed more frequently than expected. Glacier (C) has much slower retrieval and high retrieval costs. Standard (D) is the most expensive per-GB storage option.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html",
+    "tags": ["s3", "intelligent-tiering", "cost", "storage-class"]
+  },
+  {
+    "id": "d4-1-q02",
+    "objective": "4.1 — Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A solutions architect notices that an S3 bucket containing compliance logs has been accumulating charges even though no new logs have been written in months. Investigation reveals thousands of objects in STANDARD storage that were supposed to be archived. Additionally, the billing dashboard shows storage charges for objects that appear to have no corresponding completed files. What two issues should be addressed?",
+    "options": [
+      { "id": "A", "text": "Add a lifecycle transition rule to Glacier and enable versioning" },
+      { "id": "B", "text": "Add a lifecycle transition rule to Glacier and add an AbortIncompleteMultipartUpload rule" },
+      { "id": "C", "text": "Enable Requester Pays and add a lifecycle expiration rule" },
+      { "id": "D", "text": "Move to One Zone-IA and enable S3 Transfer Acceleration" }
+    ],
+    "correct": ["B"],
+    "rationale": "The two issues are: (1) objects that should be in Glacier are still in Standard — a lifecycle transition rule fixes this; (2) the phantom storage charges are from incomplete multipart upload parts accumulating — AbortIncompleteMultipartUpload lifecycle rules automatically clean these up. Versioning (A) would add more storage costs. Requester Pays (C) doesn't address the storage issues. One Zone-IA (D) is not appropriate for compliance logs (data at risk if AZ fails).",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html",
+    "tags": ["s3", "lifecycle", "multipart-upload", "cost"]
+  },
+  {
+    "id": "d4-1-q03",
+    "objective": "4.1 — Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uses a lifecycle policy to move S3 objects from Standard to Standard-IA after 30 days, then to Glacier Deep Archive after 180 days. An audit finds that thousands of small temporary files (average size 4 KB) created during batch jobs are being stored in Standard-IA for the minimum 30-day period before expiring. The finance team reports unexpectedly high Standard-IA costs. What is causing this and what is the fix?",
+    "options": [
+      { "id": "A", "text": "Small objects in Standard-IA are subject to a per-object charge of $0.01/1,000 objects plus the 30-day minimum storage duration charge, which exceeds the cost of leaving them in Standard. Add an expiration rule to delete temporary files before 30 days." },
+      { "id": "B", "text": "Standard-IA has a higher storage rate than Standard for small objects. Transition to Glacier instead." },
+      { "id": "C", "text": "The lifecycle policy is incorrect — Standard-IA does not support objects smaller than 128 KB." },
+      { "id": "D", "text": "Enable Intelligent-Tiering on the bucket to automatically optimize costs for small objects." }
+    ],
+    "correct": ["A"],
+    "rationale": "Standard-IA has a 30-day minimum storage duration. Temporary files that would naturally be deleted after a few days are being transitioned to Standard-IA and then billed for 30 days minimum — making them more expensive than if they had stayed in Standard. The fix is to add a lifecycle expiration rule to delete short-lived temporary files before the 30-day transition threshold, or exclude them from the transition rule using a prefix/tag filter. AWS does not reject small objects from Standard-IA (C is false), but does charge a minimum 128KB per object fee for Standard-IA objects smaller than 128KB, compounding the cost issue.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html#sc-infreq-data-access",
+    "tags": ["s3", "standard-ia", "minimum-duration", "cost"]
+  },
+  {
+    "id": "d4-1-q04",
+    "objective": "4.1 — Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "easy",
+    "type": "single",
+    "stem": "A team is migrating EC2 instances and wants to reduce EBS storage costs. Their current gp2 volumes are provisioned at 1,000 GB each and they need consistent 3,000 IOPS. What is the most cost-effective change?",
+    "options": [
+      { "id": "A", "text": "Migrate to io2 volumes to get guaranteed IOPS" },
+      { "id": "B", "text": "Migrate to gp3 volumes, which include 3,000 IOPS baseline at a lower per-GB price" },
+      { "id": "C", "text": "Reduce the volume size to 500 GB to lower costs" },
+      { "id": "D", "text": "Use st1 HDD volumes for lower cost per GB" }
+    ],
+    "correct": ["B"],
+    "rationale": "gp3 volumes are $0.08/GB/month compared to gp2 at $0.10/GB/month (20% cheaper). Additionally, gp3 includes 3,000 IOPS baseline for free — the same requirement this team has — so no additional IOPS charges apply. io2 (A) is more expensive, designed for databases needing extremely high IOPS. Reducing volume size (C) might not be possible if data fills the disk. st1 (D) is HDD-based, unsuitable for workloads needing consistent IOPS.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html",
+    "tags": ["ebs", "gp3", "gp2", "cost"]
+  },
+  {
+    "id": "d4-1-q05",
+    "objective": "4.1 — Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A financial services firm must retain trading records for 7 years to meet regulatory requirements. The records must be retrievable within 12 hours if requested by regulators. After the 7-year period, records must be permanently deleted. Which combination of S3 features meets these requirements at the lowest cost?",
+    "options": [
+      { "id": "A", "text": "S3 Standard with a lifecycle expiration rule at 7 years" },
+      { "id": "B", "text": "S3 Glacier Deep Archive with a lifecycle expiration rule at 7 years (2,555 days)" },
+      { "id": "C", "text": "S3 Glacier Instant Retrieval with a lifecycle expiration rule at 7 years" },
+      { "id": "D", "text": "S3 Standard-IA with a lifecycle transition to Standard when a retrieval request is made" }
+    ],
+    "correct": ["B"],
+    "rationale": "Glacier Deep Archive at $0.00099/GB/month is the cheapest S3 storage class. Standard retrieval from Deep Archive takes 12 hours, which meets the regulatory requirement. A lifecycle expiration rule at 2,555 days (7 years) automatically deletes objects when they are no longer required. Standard (A) is 23x more expensive and unnecessary for data that is never accessed in normal operation. Glacier Instant (C) costs $0.004/GB/month, which is more expensive than Deep Archive with no benefit since 12-hour retrieval is acceptable. Standard-IA (D) cannot dynamically transition objects back to Standard via lifecycle.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html#sc-glacier-deep-archive",
+    "tags": ["s3", "glacier-deep-archive", "lifecycle", "compliance", "cost"]
+  }
+]
+*/}

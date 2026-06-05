@@ -1,0 +1,147 @@
+[
+  {
+    "id": "s3-q01",
+    "domain": 3,
+    "objective": "3.1 — Design High-Performing and Elastic Compute Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a video transcoding workload on EC2 instances. Each transcoding job reads a 20 GB source video from EBS, performs CPU-intensive processing for 30-40 minutes, and writes the output back to EBS. The workload requires consistent 64,000 IOPS and 1,000 MB/s throughput throughout the job. The current GP2 volumes are causing throttling. Which EBS volume type should the solutions architect recommend?",
+    "options": [
+      { "id": "A", "text": "GP3 (General Purpose SSD). Configure the volume to deliver 16,000 IOPS and 1,000 MB/s throughput. GP3 allows independent IOPS and throughput configuration up to 16,000 IOPS per volume." },
+      { "id": "B", "text": "IO2 Block Express. IO2 Block Express supports up to 256,000 IOPS and 4,000 MB/s throughput per volume with sub-millisecond latency, satisfying the 64,000 IOPS and 1,000 MB/s requirements with headroom for growth." },
+      { "id": "C", "text": "ST1 (Throughput Optimized HDD). ST1 provides up to 500 MB/s throughput and is optimized for sequential large-block workloads." },
+      { "id": "D", "text": "SC1 (Cold HDD). SC1 is the lowest-cost option and provides adequate throughput for video processing at a reduced price point." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because IO2 Block Express is the only EBS volume type that supports 64,000+ IOPS (up to 256,000) with consistent, provisioned performance. Video transcoding at 64,000 IOPS with 1,000 MB/s throughput is a high-performance, sustained I/O workload that fits the IO2 Block Express design envelope. A is wrong because GP3 has a maximum of 16,000 IOPS per volume — less than one-quarter of the required 64,000 IOPS. GP3 cannot satisfy this requirement even with maximum provisioning. C is wrong because ST1 is an HDD-based volume optimized for large sequential throughput (big data, log processing) but delivers only 500 MB/s and has much higher latency than SSD; it cannot deliver 64,000 IOPS. D is wrong because SC1 is designed for infrequently accessed cold data and delivers the lowest throughput of any EBS type, unsuitable for intensive compute workloads.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html",
+    "tags": ["ebs", "io2", "iops", "throughput", "storage", "performance"]
+  },
+  {
+    "id": "s3-q02",
+    "domain": 3,
+    "objective": "3.3 — Design High-Performing Database Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A social media application stores user activity events in Amazon DynamoDB. The table uses user_id as the partition key and timestamp as the sort key. The application has 10 million active users, but 0.1% of them (celebrities) generate 80% of all write traffic. DynamoDB is returning ProvisionedThroughputExceededException errors on the celebrity user partitions even though overall consumed capacity is well below provisioned capacity. Which design change addresses this hot partition problem?",
+    "options": [
+      { "id": "A", "text": "Increase the provisioned write capacity units (WCUs) to 10x the current value. Higher capacity will handle the celebrity user burst." },
+      { "id": "B", "text": "Enable DynamoDB Auto Scaling to automatically adjust WCUs based on demand. Auto Scaling will detect and resolve the hot partition issue." },
+      { "id": "C", "text": "Use a write sharding pattern: append a random suffix (1–10) to the celebrity user_id to create up to 10 logical partitions per celebrity (e.g., user_id#3). Distribute celebrity writes across these shards. At read time, scatter-gather across all 10 shards and aggregate results." },
+      { "id": "D", "text": "Switch the partition key from user_id to timestamp so events are distributed by time rather than by user." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because hot partitions in DynamoDB occur when one partition key value receives disproportionate traffic. Write sharding distributes the celebrity's writes across multiple physical partitions by appending a random suffix to the partition key, spreading load across up to 10 physical partitions and multiplying the effective write capacity available to that user. This is the documented AWS best practice for hot partition mitigation. A is wrong because increasing WCUs raises the table's total capacity but does not change how traffic is distributed. DynamoDB allocates capacity equally across partitions; a single celebrity partition still has the same per-partition limit. B is wrong because Auto Scaling adjusts total table capacity, not per-partition distribution. Hot partitions persist because the issue is unequal distribution, not total capacity shortage. D is wrong because using timestamp as the partition key distributes recent writes to the same time-based partition (most writes are to 'now'), creating a new hot partition problem known as a 'hot key' on the current time window.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-sharding.html",
+    "tags": ["dynamodb", "hot-partition", "write-sharding", "partition-key", "performance", "nosql"]
+  },
+  {
+    "id": "s3-q03",
+    "domain": 3,
+    "objective": "3.3 — Design High-Performing Database Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A gaming leaderboard application requires a caching layer for fast lookups of player rankings. The use case requires sorted set operations to retrieve the top 100 players in O(log N) time, the ability to increment a player's score atomically, and pub/sub capability to push ranking updates to connected clients. The cache must persist data across restarts to avoid cold start latency. Which ElastiCache engine should the solutions architect choose?",
+    "options": [
+      { "id": "A", "text": "ElastiCache for Memcached. Memcached provides simple, fast key-value caching and multi-threaded architecture for high throughput." },
+      { "id": "B", "text": "ElastiCache for Redis. Redis natively supports sorted sets (ZADD, ZRANGE, ZINCRBY), pub/sub messaging, and Redis Append-Only File (AOF) or RDB persistence for data durability across restarts." },
+      { "id": "C", "text": "ElastiCache for Memcached with a consistent hashing client library. Distribute the leaderboard across multiple Memcached nodes to handle sorted operations." },
+      { "id": "D", "text": "Amazon DynamoDB with a local secondary index on the score attribute. Use eventually consistent reads for leaderboard queries." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because ElastiCache for Redis provides all three required capabilities natively: (1) sorted sets (ZSET) with ZADD for score updates and ZINCRBY for atomic increments, ZREVRANGE for top-N leaderboard retrieval in O(log N); (2) native pub/sub with PUBLISH/SUBSCRIBE for push notifications to connected clients; (3) AOF or RDB persistence to restore data after a restart. No competing option provides all three. A is wrong because Memcached does not support complex data structures (sorted sets), has no pub/sub mechanism, and does not support persistence — data is lost on restart. C is wrong for the same reasons as A; distributing simple key-value pairs across Memcached nodes does not add sorted set or pub/sub functionality. D is wrong because DynamoDB is a fully managed database, not an in-memory cache. LSI-based leaderboard queries add read latency compared to an in-memory sorted set, and DynamoDB has no pub/sub capability.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html",
+    "tags": ["elasticache", "redis", "sorted-set", "pub-sub", "caching", "leaderboard"]
+  },
+  {
+    "id": "s3-q04",
+    "domain": 3,
+    "objective": "3.1 — Design High-Performing and Elastic Compute Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs an event-driven image processing pipeline using AWS Lambda. Each invocation cold starts a 512 MB Python function that loads a 150 MB machine learning model from S3, taking 8-12 seconds before processing begins. Production traffic averages 200 invocations per minute throughout the day with no idle periods. Cold starts affect 5% of invocations due to Lambda scaling events, causing user-visible latency spikes. Which Lambda configuration change best eliminates the cold start latency?",
+    "options": [
+      { "id": "A", "text": "Increase the Lambda function memory to 3,008 MB. More memory allocates more CPU, reducing initialization time." },
+      { "id": "B", "text": "Package the ML model into the Lambda container image (up to 10 GB). Move model loading to the Lambda initialization code outside the handler. Enable Provisioned Concurrency to keep a defined number of execution environments pre-initialized and warm at all times." },
+      { "id": "C", "text": "Use Lambda SnapStart (available for Java runtimes) to snapshot the initialized execution environment and restore it instantly on subsequent invocations." },
+      { "id": "D", "text": "Configure a CloudWatch Events rule to invoke the Lambda function every 5 minutes with a ping event to keep it warm. This is sufficient for 200 invocations/minute traffic." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Provisioned Concurrency is the definitive solution to Lambda cold starts for production workloads. Pre-initializing a defined number of execution environments means the initialization code (including model loading) runs in advance, not on the critical path of the user request. Packaging the 150 MB model in the container image eliminates the S3 download during initialization. With 200 invocations/minute consistent traffic, provisioning enough concurrency to cover the scaling events eliminates the 5% cold start rate entirely. A is wrong because increasing memory allocates more vCPU proportionally and can reduce initialization time slightly, but the 8-12 second cold start is dominated by the model loading I/O, not CPU. Memory increase alone will not bring this to an acceptable level. C is wrong because Lambda SnapStart is only available for Java 11/17/21 runtimes (not Python), making it inapplicable here. D is wrong because ping-based warming is an unreliable anti-pattern. Lambda scales horizontally by creating new execution environments — a single ping keeps only one environment warm, while 200 concurrent invocations may spin up dozens of new cold containers.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html",
+    "tags": ["lambda", "cold-start", "provisioned-concurrency", "container-image", "performance", "serverless"]
+  },
+  {
+    "id": "s3-q05",
+    "domain": 3,
+    "objective": "3.2 — Design High-Performing Storage Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uploads 50,000 objects per second to Amazon S3. Each object is a small sensor reading (2 KB) with a key name format of sensor_id/timestamp. The S3 bucket is receiving 503 SlowDown errors. The data science team also runs hourly batch jobs that scan all objects from the last hour using the prefix sensor_id/ to aggregate readings per sensor. Which two changes best address the S3 performance problem without changing the batch job logic significantly? (Choose TWO)",
+    "options": [
+      { "id": "A", "text": "Add a random hex prefix to all object keys (e.g., a3f2/sensor_id/timestamp). This distributes PUT requests across more S3 partitions." },
+      { "id": "B", "text": "Enable S3 Transfer Acceleration on the bucket. Transfer Acceleration routes uploads through CloudFront edge locations for faster throughput." },
+      { "id": "C", "text": "Request a service quota increase for S3 PUT requests per second through AWS Support." },
+      { "id": "D", "text": "Use S3 Inventory to generate a daily manifest of objects and query it with Amazon Athena instead of using S3 LIST operations in the batch job." },
+      { "id": "E", "text": "Spread the sensor data across multiple S3 buckets, one per geographic region of the sensors." }
+    ],
+    "correct": ["A", "D"],
+    "rationale": "A and D are correct. A: S3 automatically partitions based on key prefixes. When millions of objects share the same prefix structure (sensor_id/timestamp), all writes go to the same partition and hit the per-partition request limit (3,500 PUT/s per prefix). Adding a random hex prefix distributes writes across many partitions, multiplying effective PUT throughput. This is the documented AWS recommendation for high-ingest S3 workloads. D: The batch job using s3:ListObjects at scale generates expensive LIST API calls. S3 Inventory produces a pre-generated manifest CSV/Parquet, and Athena can query it directly against an S3 Select or Glue catalog without consuming S3 LIST quota. This reduces the operational load on the bucket and speeds up the batch aggregation. B is wrong because Transfer Acceleration improves upload speed over long geographic distances (internet path optimization) but does not resolve S3 internal partition throughput limits. C is wrong because S3 request rates are not a quota you raise via Support — S3 auto-scales partitions based on key distribution. The solution is key design, not a quota increase. E is wrong because splitting across buckets by region adds complexity and does not address the key distribution problem within a single prefix.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html",
+    "tags": ["s3", "performance", "key-prefix", "partitioning", "s3-inventory", "high-throughput"]
+  },
+  {
+    "id": "s3-q06",
+    "domain": 3,
+    "objective": "3.1 — Design High-Performing and Elastic Compute Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A genomics research company needs to run a large-scale bioinformatics workload that processes 100 TB of genome sequence data. The job is highly parallelizable: 10,000 independent analysis tasks, each requiring 96 vCPUs and 384 GB RAM for approximately 6 hours. The workload runs once per month and must complete within 12 hours. Cost minimization is important. Which EC2 instance family and purchasing model is most appropriate?",
+    "options": [
+      { "id": "A", "text": "Run on m5.24xlarge On-Demand instances. The m5 family provides balanced compute and memory for general workloads." },
+      { "id": "B", "text": "Run on c5n.18xlarge Reserved Instances with a 1-year term. Reserved Instances provide the highest discount for predictable workloads." },
+      { "id": "C", "text": "Run on hpc6a.48xlarge or c5.24xlarge Spot Instances with Spot Fleet and instance diversification across multiple instance types and Availability Zones. Use a checkpointing mechanism so interrupted tasks resume from their last checkpoint." },
+      { "id": "D", "text": "Run on r5.24xlarge On-Demand instances. The r5 memory-optimized family is required for 384 GB RAM workloads." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because this workload profile — massively parallel, monthly, time-bounded HPC job — is an ideal candidate for Spot Instances. The 10,000 tasks are independent (no inter-task communication dependency), so a Spot interruption only affects individual tasks. Using Spot Fleet with instance diversification (multiple instance types, multiple AZs) maximizes Spot availability and minimizes the probability of fleet-wide interruption. Checkpointing ensures interrupted tasks resume, not restart. Spot Instances save up to 90% over On-Demand, which is significant at this scale. A is wrong because m5 On-Demand is substantially more expensive than Spot and the m5 family is general-purpose — for compute-intensive genomics, c5 or hpc6a instances would be more appropriate. B is wrong because Reserved Instances make no financial sense for monthly workloads — they are priced for continuous, predictable usage. A 1-year RI for a workload that runs 6 hours/month (72 hours/year out of 8,760) achieves <1% utilization. D is wrong because r5 is memory-optimized (more RAM per vCPU ratio), but 384 GB RAM fits on standard compute instances (e.g., c5.24xlarge = 192 GB RAM × 2 instances); On-Demand pricing also removes the major cost benefit.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-fleet.html",
+    "tags": ["ec2", "spot-instances", "spot-fleet", "hpc", "genomics", "compute-optimized"]
+  },
+  {
+    "id": "s3-q07",
+    "domain": 3,
+    "objective": "3.2 — Design High-Performing Storage Solutions",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A financial analytics platform runs complex SQL aggregations over historical trade data. The dataset is 50 TB of structured data. Queries scan 5-10 TB per execution and are run by 20-50 concurrent analysts. Average query time is 45 minutes on the current on-premises Oracle data warehouse. The team wants sub-5-minute query times. The data schema is fixed with no update/delete patterns — only appends. Which AWS database service best addresses this requirement?",
+    "options": [
+      { "id": "A", "text": "Amazon RDS for Oracle with Multi-AZ. Lift and shift the existing Oracle workload to RDS with the same schema and queries." },
+      { "id": "B", "text": "Amazon Aurora PostgreSQL with read replicas. Route analytics queries to read replicas to offload the primary." },
+      { "id": "C", "text": "Amazon Redshift with a ra3 node cluster. Redshift is a columnar MPP (Massively Parallel Processing) data warehouse designed for petabyte-scale analytics. Use columnar compression and distribution keys matched to query join patterns. Enable Redshift Spectrum for S3 data lake queries." },
+      { "id": "D", "text": "Amazon DynamoDB with on-demand capacity. Use DynamoDB's single-digit millisecond latency for fast analytics queries." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because Amazon Redshift is AWS's purpose-built MPP columnar data warehouse, designed exactly for this workload: large-scale analytical SQL, TB-scale scans, dozens of concurrent queries, and append-only data. Columnar storage means queries that access only a subset of columns (typical in analytics) skip irrelevant data physically on disk. MPP distributes query execution across all nodes in parallel, enabling sub-minute query times for workloads that take hours on row-store databases. ra3 nodes separate compute from storage, allowing independent scaling. A is wrong because RDS for Oracle is a transactional row-store database — migrating the same Oracle workload to RDS would yield similar query performance, not a 10x improvement. Row-store databases are inefficient for full-table analytical scans. B is wrong because Aurora PostgreSQL is a row-store OLTP database. Read replicas help with read-heavy OLTP workloads but do not fundamentally change the query execution engine for analytics. C is the right tool for OLAP, not OLTP. D is wrong because DynamoDB is a key-value/document NoSQL database with no SQL aggregation capability. It does not support complex JOINs or GROUP BY operations over 50 TB datasets.",
+    "sourceUrl": "https://docs.aws.amazon.com/redshift/latest/mgmt/welcome.html",
+    "tags": ["redshift", "data-warehouse", "analytics", "mpp", "olap", "columnar"]
+  },
+  {
+    "id": "s3-q08",
+    "domain": 3,
+    "objective": "3.4 — Design High-Performing Network Architectures",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A video streaming platform delivers on-demand content to users worldwide. Static video files (1-10 GB each) are stored in S3 in us-east-1. Users in Asia-Pacific report buffering and slow start times. The content catalog is 500 TB and grows by 2 TB per day. Popular titles are watched thousands of times per day; long-tail titles are watched fewer than 10 times per day globally. Which architecture minimizes latency for popular content without paying to cache the entire 500 TB catalog at the edge?",
+    "options": [
+      { "id": "A", "text": "Deploy S3 buckets in each AWS region (us-east-1, ap-southeast-1, ap-northeast-1) and use S3 Cross-Region Replication to copy all objects to every region. Use Route 53 latency routing to send users to the nearest bucket." },
+      { "id": "B", "text": "Use Amazon CloudFront with the S3 bucket in us-east-1 as the origin. CloudFront caches video segments at edge locations closest to users. Popular content remains cached between requests; long-tail content is fetched from origin on cache miss but still benefits from edge-accelerated TCP connections. Set a high TTL (24+ hours) for video segments." },
+      { "id": "C", "text": "Use AWS Global Accelerator with the S3 bucket as the endpoint. Global Accelerator routes all user requests over the AWS backbone to us-east-1 for every request, bypassing the public internet for the S3 segment download." },
+      { "id": "D", "text": "Pre-transcode all videos into 10-second segments and store each segment as a separate S3 object. Enable S3 Transfer Acceleration on the bucket to improve download speed for all segments globally." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Amazon CloudFront is a content delivery network with 400+ edge locations worldwide. Popular video content (watched thousands of times/day) will have high cache hit rates, served locally from Asia-Pacific edge locations with single-digit millisecond latency. Long-tail content with low view counts will cache-miss and fetch from origin, but CloudFront still improves the experience through persistent TCP connections, HTTP/2, and routing over the AWS network for part of the journey. The 24+ hour TTL ensures popular content stays cached between requests. This selectively caches what's popular (not the full 500 TB) based on demand. A is wrong because replicating 500 TB to every region costs substantial storage and replication fees, and long-tail content wastes storage in every region it is replicated to but rarely accessed from. C is wrong because Global Accelerator does not cache content — every request still fetches from the S3 origin in us-east-1. It improves routing but every request traverses the full network path. D is wrong because S3 Transfer Acceleration optimizes the upload/download path using CloudFront's edge network but does not cache content — every download still hits the S3 origin for each segment.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html",
+    "tags": ["cloudfront", "cdn", "s3", "video-streaming", "caching", "edge", "performance"]
+  }
+]

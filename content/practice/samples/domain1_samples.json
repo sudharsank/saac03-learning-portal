@@ -1,0 +1,146 @@
+[
+  {
+    "id": "s1-q01",
+    "domain": 1,
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A financial services company operates three AWS accounts: a central Security account, a Production account, and a Development account. The security team needs to audit IAM activity across all accounts from the Security account without granting permanent credentials to any individual. The solution must follow the principle of least privilege and allow the security team to assume roles only during authorized audit windows. Which approach best meets these requirements?",
+    "options": [
+      { "id": "A", "text": "Create IAM users in the Production and Development accounts. Share their access keys with the security team in the Security account and store the keys in AWS Secrets Manager." },
+      { "id": "B", "text": "In the Production and Development accounts, create IAM roles with a trust policy allowing the Security account to assume them. Grant the security team in the Security account permission to call sts:AssumeRole targeting those roles. Enable AWS CloudTrail in all accounts and centralize logs in the Security account S3 bucket." },
+      { "id": "C", "text": "Enable AWS Organizations and use Service Control Policies (SCPs) to grant the Security account full administrative access to all member accounts." },
+      { "id": "D", "text": "Create a single IAM role in the Security account with AdministratorAccess and share the role ARN with the security team for use during audits." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because cross-account IAM roles with trust policies are the AWS-recommended pattern for granting temporary, auditable access across accounts without long-lived credentials. The security team assumes the role only when needed, and CloudTrail captures all API activity. A is wrong because sharing static access keys violates least-privilege and creates credential management risk. C is wrong because SCPs restrict permissions but do not grant cross-account access; full admin via SCP would also violate least privilege. D is wrong because placing the role in the Security account does not grant access to resources in Production or Development accounts.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html",
+    "tags": ["iam", "cross-account", "sts", "assume-role", "security", "cloudtrail"]
+  },
+  {
+    "id": "s1-q02",
+    "domain": 1,
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A healthcare company stores PHI (Protected Health Information) in Amazon S3 and must comply with HIPAA. The compliance team mandates that encryption keys must be managed by the company — not AWS — and that every key usage event must be logged for a minimum of 7 years. The company already has an on-premises HSM infrastructure. Which S3 encryption option satisfies all requirements with the least operational overhead for ongoing key rotation?",
+    "options": [
+      { "id": "A", "text": "Use SSE-S3 (AES-256). S3 automatically manages and rotates keys, and access logs satisfy the audit requirement." },
+      { "id": "B", "text": "Use SSE-KMS with AWS managed keys (aws/s3). Enable CloudTrail to log KMS API calls and store logs in a separate S3 bucket with a 7-year lifecycle policy." },
+      { "id": "C", "text": "Use SSE-KMS with a customer managed KMS key backed by AWS CloudHSM. Enable automatic key rotation on the KMS key, configure CloudTrail to log all KMS API calls, and store CloudTrail logs in a separate S3 bucket with a lifecycle rule retaining objects for 7 years." },
+      { "id": "D", "text": "Use SSE-C (customer-provided keys) where the application sends the encryption key with each S3 API request. Store the master key on the on-premises HSM and derive per-object keys from it." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because SSE-KMS with a customer managed key backed by CloudHSM gives the company full control over key material (satisfying the 'company must manage keys' HIPAA requirement), while CloudTrail provides a tamper-evident audit log of every Encrypt/Decrypt call. The 7-year S3 lifecycle policy on the CloudTrail bucket meets the retention requirement. Automatic annual key rotation reduces operational burden. A is wrong because SSE-S3 uses AWS-managed keys, which violates the company key management requirement. B is wrong because AWS managed keys (aws/s3) are controlled by AWS, not the customer — the company cannot restrict or audit key usage independently. D is wrong because SSE-C places the full burden of key delivery, storage, and rotation on the application, introducing significant risk if the key is ever transmitted insecurely or lost.",
+    "sourceUrl": "https://docs.aws.amazon.com/kms/latest/developerguide/services-s3.html",
+    "tags": ["s3", "encryption", "kms", "cloudhsm", "hipaa", "compliance", "cloudtrail"]
+  },
+  {
+    "id": "s1-q03",
+    "domain": 1,
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company is designing a 3-tier web application on AWS. The presentation tier consists of EC2 instances behind an Application Load Balancer in public subnets. The application tier runs EC2 instances in private subnets. The data tier uses RDS MySQL in isolated subnets with no internet access. A security review identifies that the application tier instances must communicate with an external payment API over the internet but must never be reachable from the internet. Which combination of controls achieves this while following the principle of least privilege?",
+    "options": [
+      { "id": "A", "text": "Place the application tier EC2 instances in public subnets with Elastic IPs. Use security groups to block inbound traffic from the internet while allowing outbound HTTPS to the payment API." },
+      { "id": "B", "text": "Keep the application tier in private subnets. Add a NAT Gateway in a public subnet. Configure the application tier security group to allow outbound HTTPS (443) to the payment API's IP range. Configure the RDS security group to allow inbound MySQL (3306) only from the application tier security group." },
+      { "id": "C", "text": "Keep the application tier in private subnets with no NAT Gateway. Use a VPC endpoint for S3 to route payment API traffic." },
+      { "id": "D", "text": "Place all tiers in the same public subnet and use Network ACLs with deny rules for inbound traffic on all ports except 80 and 443." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because it separates concerns correctly: the NAT Gateway in the public subnet allows the private application tier to initiate outbound HTTPS connections to the payment API without exposing the instances to inbound internet traffic. Security group rules enforce least-privilege at both the application tier (outbound to payment API only) and the data tier (inbound MySQL only from application tier). A is wrong because placing application tier instances in public subnets with EIPs exposes them to direct internet access, and relying solely on security groups for protection is less defense-in-depth. C is wrong because VPC endpoints only serve AWS services, not arbitrary external APIs; the application tier would have no internet egress. D is wrong because co-locating all tiers in public subnets eliminates network-level isolation for the data tier.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html",
+    "tags": ["vpc", "security-groups", "nat-gateway", "3-tier", "network-security", "private-subnet"]
+  },
+  {
+    "id": "s1-q04",
+    "domain": 1,
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's e-commerce website is under a credential stuffing attack where attackers use a list of stolen username/password pairs to attempt login. The attack originates from thousands of different IP addresses globally, and legitimate users are being locked out. The security team must block the attack within 30 minutes with minimal disruption to real customers. The website is served through CloudFront with an Application Load Balancer as the origin. Which solution addresses this most effectively?",
+    "options": [
+      { "id": "A", "text": "Add an AWS WAF Web ACL to the CloudFront distribution. Create a rate-based rule that blocks any single IP sending more than 100 requests per 5-minute window to the /login endpoint." },
+      { "id": "B", "text": "Update the ALB security group to block all inbound traffic, then add the known good IP ranges back one by one." },
+      { "id": "C", "text": "Enable AWS Shield Advanced on the CloudFront distribution. Shield Advanced will automatically detect and mitigate credential stuffing attacks." },
+      { "id": "D", "text": "Deploy a Lambda@Edge function that inspects the User-Agent header and blocks any request without a browser User-Agent string." }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because AWS WAF with a rate-based rule directly addresses credential stuffing: each of the thousands of attacking IPs is sending many requests to the login endpoint. A rate-based rule automatically blocks individual IPs that exceed the threshold (e.g., 100 requests per 5 minutes) without requiring manual IP enumeration and without impacting legitimate users who rarely exceed the threshold. Attaching the WAF to CloudFront ensures blocking happens at the edge before requests reach the ALB or application servers. B is wrong because blocking all inbound traffic is not targeted and would deny legitimate customers access. C is wrong because AWS Shield Advanced is designed for DDoS (volumetric/protocol layer) attacks, not application-layer credential stuffing; it does not have credential stuffing detection logic. D is wrong because sophisticated credential stuffing bots typically send realistic User-Agent strings, making this filter ineffective.",
+    "sourceUrl": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html",
+    "tags": ["waf", "cloudfront", "rate-based-rule", "security", "ddos", "credential-stuffing"]
+  },
+  {
+    "id": "s1-q05",
+    "domain": 1,
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company processes credit card transactions and must comply with PCI DSS. Encryption keys protecting cardholder data in Amazon RDS must be rotated every 12 months, and all key management operations must be logged. The company uses AWS KMS customer managed keys (CMKs) for RDS encryption. The database administrator asks whether automatic key rotation in KMS satisfies the PCI DSS key rotation requirement without downtime. What is the correct explanation of how KMS automatic key rotation works in this context?",
+    "options": [
+      { "id": "A", "text": "Enabling automatic rotation on a KMS CMK generates a new cryptographic key material every year. KMS re-encrypts all existing RDS data under the new key material automatically, and the old key material is deleted after rotation." },
+      { "id": "B", "text": "Enabling automatic rotation on a KMS CMK generates new key material each year, but the CMK's ARN and alias remain the same. KMS transparently uses the current key material for new encryption operations and retains old key material to decrypt existing data. RDS data encrypted before rotation is seamlessly decrypted using the appropriate older key material. No downtime or data re-encryption is required." },
+      { "id": "C", "text": "KMS automatic rotation changes the CMK's ARN every year. Applications and RDS instances must be updated to reference the new ARN after each rotation to avoid decryption failures." },
+      { "id": "D", "text": "KMS automatic rotation is not supported for keys used with RDS. The database administrator must manually create a new CMK, update the RDS instance to use it, and re-encrypt snapshots annually." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct. AWS KMS automatic annual key rotation generates new backing key material but keeps the same CMK ARN, alias, and key ID. All past ciphertexts remain decryptable because KMS retains all previous key material versions internally. New plaintext is encrypted with the newest key material. This means RDS (which uses the CMK transparently through the KMS data key envelope encryption model) experiences zero downtime and no re-encryption of existing data. CloudTrail logs every KMS API call, satisfying audit requirements. A is wrong because KMS does NOT re-encrypt existing data on rotation; old material is retained, not deleted. C is wrong because the ARN does not change on rotation — this is a core feature of KMS rotation. D is wrong because automatic rotation is fully supported for KMS keys used with RDS.",
+    "sourceUrl": "https://docs.aws.amazon.com/kms/latest/developerguide/rotate-keys.html",
+    "tags": ["kms", "key-rotation", "rds", "pci-dss", "encryption", "compliance"]
+  },
+  {
+    "id": "s1-q06",
+    "domain": 1,
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's application running on EC2 instances needs database credentials, API keys, and TLS certificates for third-party services. The credentials must be rotated every 30 days automatically. The application team wants to avoid hardcoding credentials in environment variables or AMIs. When a rotation occurs, the application must pick up the new secret without restarting. Which AWS service and pattern best satisfies these requirements?",
+    "options": [
+      { "id": "A", "text": "Store all credentials as Systems Manager Parameter Store SecureString parameters. Use a Lambda function triggered by a CloudWatch Events rule every 30 days to update the parameters. The application reads the parameter value once at startup and caches it." },
+      { "id": "B", "text": "Store credentials in AWS Secrets Manager with automatic rotation enabled. Configure the rotation Lambda to generate new credentials and update the secret. The application fetches the secret from Secrets Manager by name at runtime (not startup), using the Secrets Manager SDK, and caches the value with a short TTL so new rotations are picked up without restart." },
+      { "id": "C", "text": "Store credentials encrypted in an S3 bucket. EC2 instances download the credentials file using an IAM role at startup and cache it in memory. Run a daily cron job to check for updated files." },
+      { "id": "D", "text": "Use AWS Certificate Manager (ACM) to manage all credentials and certificates. ACM auto-rotates credentials every 30 days and integrates directly with EC2 instance profiles." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because AWS Secrets Manager is purpose-built for this use case: it supports automatic rotation via Lambda (including built-in rotation templates for RDS, Redshift, and DocumentDB), stores secrets encrypted with KMS, and the SDK retrieves the latest version at runtime. Using a short TTL cache means the application automatically uses newly rotated credentials within seconds to minutes without requiring a restart. A is wrong because Parameter Store does not support automatic credential rotation; the custom Lambda approach is fragile and the application caches at startup, meaning it must restart to pick up new values. C is wrong because S3 has no native secret rotation capability and the cron polling approach is unreliable. D is wrong because ACM manages TLS certificates for AWS services (ALB, CloudFront) — it does not manage application credentials or API keys, and does not integrate with EC2 instance profiles for credential retrieval.",
+    "sourceUrl": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html",
+    "tags": ["secrets-manager", "rotation", "ec2", "iam", "credentials", "security"]
+  },
+  {
+    "id": "s1-q07",
+    "domain": 1,
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs EC2 instances in private subnets that need to call external third-party REST APIs over HTTPS. The security team requires that all outbound internet traffic from private subnets be inspected for data exfiltration before leaving the VPC. A traditional NAT Gateway passes traffic without inspection. Which architecture satisfies the outbound inspection requirement?",
+    "options": [
+      { "id": "A", "text": "Replace the NAT Gateway with a NAT instance running in a public subnet. Configure iptables rules on the NAT instance to block all non-HTTPS outbound traffic." },
+      { "id": "B", "text": "Deploy AWS Network Firewall in the VPC. Route outbound traffic from the private subnet through the Network Firewall before it exits through the NAT Gateway to the internet. Create stateful firewall rules that inspect HTTPS traffic and block traffic to unauthorized domains." },
+      { "id": "C", "text": "Enable VPC Flow Logs on the private subnets and send them to CloudWatch Logs. Set up metric filters and CloudWatch Alarms to alert when unusual outbound data volumes are detected." },
+      { "id": "D", "text": "Attach a restrictive Security Group outbound rule to the private EC2 instances limiting outbound traffic to port 443 only. This prevents data exfiltration over other ports." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because AWS Network Firewall provides stateful deep packet inspection for VPC traffic. By routing private subnet egress through Network Firewall before the NAT Gateway, the security team can apply domain-based filtering rules (e.g., block all destinations except known good API domains) and detect anomalous patterns. This satisfies the inspection requirement that NAT Gateway alone cannot provide. A is wrong because a self-managed NAT instance with iptables only blocks by port/protocol, not by content or destination domain; it also introduces operational overhead and is a single point of failure. C is wrong because VPC Flow Logs provide metadata (IPs, bytes, ports) but do not inspect payload content or block traffic in real time — they are detective, not preventive. D is wrong because restricting to port 443 is useful but insufficient for data exfiltration prevention; HTTPS traffic on port 443 can carry any payload to any destination.",
+    "sourceUrl": "https://docs.aws.amazon.com/network-firewall/latest/developerguide/what-is-aws-network-firewall.html",
+    "tags": ["network-firewall", "vpc", "nat-gateway", "inspection", "egress", "security"]
+  },
+  {
+    "id": "s1-q08",
+    "domain": 1,
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A SaaS company stores customer-uploaded documents in Amazon S3. External partners need temporary, time-limited access to specific objects without creating IAM users or requiring AWS credentials. The objects are in a private bucket with no public access. Access must expire in exactly 60 minutes and must be auditable. Partners are authenticated by the SaaS application using its own user directory. Which mechanism should the application use to provide access?",
+    "options": [
+      { "id": "A", "text": "Change the S3 bucket ACL to allow public-read for the specific objects partners need, then remove the public-read permission after 60 minutes using a Lambda function triggered by EventBridge." },
+      { "id": "B", "text": "Create a bucket policy that allows s3:GetObject for any principal (\"Principal\": \"*\") but adds a Condition block with aws:CurrentTime to restrict access to a 60-minute window." },
+      { "id": "C", "text": "Use the AWS SDK to generate S3 presigned URLs for each object, specifying an expiry of 3600 seconds (60 minutes). Return the presigned URL to the authenticated partner. Log the URL generation event in CloudTrail." },
+      { "id": "D", "text": "Create temporary IAM users for each partner with a 60-minute password policy and attach an IAM policy granting s3:GetObject. Delete the users after the session expires." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because S3 presigned URLs are the standard AWS pattern for granting temporary, unauthenticated (no AWS credentials required) access to specific S3 objects. The application signs the URL using its IAM role credentials, embeds the expiry time, and sends the URL to the partner. After 3600 seconds the URL is cryptographically invalid. CloudTrail records the s3:GetObject API call against the generating IAM identity, providing auditability. No bucket policy changes are needed. A is wrong because making objects public-read is a broad policy change, and the Lambda/EventBridge cleanup approach is fragile — if the Lambda fails, the object remains public. B is wrong because a bucket policy using aws:CurrentTime would need to be updated for every partner request and every 60-minute window, which is operationally unscalable. D is wrong because creating temporary IAM users is an anti-pattern — AWS recommends using temporary credentials from STS, not creating and deleting IAM users.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html",
+    "tags": ["s3", "presigned-url", "access-control", "temporary-access", "cloudtrail", "security"]
+  }
+]

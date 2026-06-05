@@ -5,6 +5,395 @@ domain: 3
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 3.2 — High-Performing Compute Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+High-performing compute architecture on AWS means matching the right compute primitive — EC2 instances, containers, or serverless functions — to each workload's CPU, memory, network, and I/O profile, then layering elasticity mechanisms that scale capacity automatically in response to demand. Over-provisioning wastes money; under-provisioning creates latency spikes and dropped requests. AWS provides compute services across three abstraction levels: **virtual machines** (EC2 — full OS control, widest choice of CPU/GPU/memory/storage configurations), **containers** (ECS/EKS — packaging workloads with their dependencies, lower overhead than VMs), and **serverless functions** (Lambda — event-driven, no server management, millisecond billing granularity).
+
+The choice of instance family is the first lever. AWS groups instances into families: general purpose (M, T), compute-optimized (C), memory-optimized (R, X, z1d), storage-optimized (I, D), and accelerated computing (G, P, Inf, Trn). Each family optimizes a different resource ratio. Running a CPU-bound video transcoding job on an M-series instance wastes memory and underdelivers compute; running it on a C-series instance at the same cost delivers higher vCPU throughput.
+
+Elasticity mechanisms — Auto Scaling Groups, Lambda concurrency, ECS service auto scaling — ensure that compute tracks load without manual intervention. Placement groups add network topology awareness, enabling sub-10 microsecond instance-to-instance latency in the same cluster or fault isolation across hardware in spread and partition groups.
+
+## Key Components
+
+- **EC2 Instance Families** — M (general), C (compute), R (memory), I/D (storage), G/P (GPU), T (burstable)
+- **Placement Groups** — Cluster (low latency, same AZ), Spread (isolated hardware, different AZs), Partition (isolated fault domains)
+- **EC2 Auto Scaling** — Launch templates, scaling policies (target tracking, step, scheduled, predictive), lifecycle hooks, warm pools
+- **AWS Lambda** — Event-driven functions; reserved concurrency, provisioned concurrency, Lambda@Edge, CloudFront Functions
+- **Amazon ECS** — Fargate (serverless) and EC2 launch types; task definitions, services, capacity providers
+- **Amazon EKS** — Managed Kubernetes; managed node groups, self-managed nodes, Fargate profiles
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### EC2 Instance Families
+
+AWS instance types follow the naming convention: **family + generation + attributes + size** (e.g., `c7g.2xlarge` = Compute, 7th gen, Graviton, 2xlarge).
+
+| Family | Optimized For | Example Types | Workloads |
+|--------|---------------|---------------|-----------|
+| M (General) | Balanced CPU/memory | m7i, m6g | Web apps, small databases, dev/test |
+| T (Burstable) | Low baseline + burst | t3, t4g | Low-traffic apps with occasional spikes |
+| C (Compute) | High vCPU-to-memory | c7i, c7g | HPC, video encoding, batch jobs, gaming |
+| R (Memory) | High memory-to-vCPU | r7i, r6g | In-memory databases, SAP HANA, Spark |
+| X (Memory Extreme) | Largest memory pools | x2idn | SAP HANA scale-up, in-memory analytics |
+| I (Storage NVMe) | NVMe SSD local storage | i4i, i3en | NoSQL, real-time analytics, caching |
+| D (Dense Storage) | HDD local storage | d3, d3en | Data warehouses, distributed file systems |
+| G (GPU Graphics) | NVIDIA GPU | g5, g4dn | ML inference, video transcoding, VDI |
+| P (GPU Parallel) | NVIDIA/Trainium | p4d, p5 | ML training, deep learning |
+| Inf (Inferentia) | AWS Inferentia chips | inf2 | High-throughput ML inference (cost-optimized) |
+
+**T-series CPU Credits**: T-series instances accumulate CPU credits when running below baseline CPU utilization. Credits are spent when bursting above baseline. In **Standard mode**, credits expire after 24 hours; the instance throttles when credits are exhausted. In **Unlimited mode**, the instance continues to burst beyond earned credits but incurs additional CPU charges. Unlimited mode is suitable for sustained variable workloads; Standard mode is cost-capped.
+
+### Placement Groups
+
+Placement groups control where EC2 instances are placed within AWS infrastructure, with three distinct behaviors:
+
+**Cluster Placement Group**
+- All instances in a **single AZ**, on hardware physically close together (potentially same rack)
+- **Lowest network latency** (~10 Gbps enhanced networking, up to 100 Gbps with ENA Express)
+- Best for: tightly coupled HPC, MPI jobs, low-latency in-memory distributed caches
+- Limitation: single AZ = single point of failure; not suitable for HA by itself
+- Requires instances with **enhanced networking** (ENA or Intel 82599 VF); launch all instances at once to avoid capacity errors
+
+**Spread Placement Group**
+- Each instance is placed on **different underlying hardware** (different racks, different power sources)
+- Supports **multiple AZs**
+- Maximum **7 instances per AZ** per spread group
+- Best for: small sets of critical instances that must not fail together (ZooKeeper quorum, bastion hosts, primary/secondary pairs)
+
+**Partition Placement Group**
+- Divides instances into **logical partitions** (up to 7 per AZ); each partition has its own rack of hardware
+- Instances in different partitions do not share hardware, but instances within the same partition may
+- Supports large-scale distributed systems: HDFS, HBase, Cassandra, Kafka where rack awareness matters
+- No limit on number of instances in a partition
+
+### EC2 Auto Scaling
+
+Auto Scaling Groups (ASGs) ensure the right number of EC2 instances are running to handle load. Core concepts:
+
+- **Launch Template**: Defines instance configuration (AMI, instance type, security groups, key pair, user data, IAM role). Preferred over legacy Launch Configurations because templates support versioning, multiple instance types, Spot + On-Demand mixing.
+- **Scaling Policies**:
+  - *Target Tracking*: Maintain a metric at a target value (e.g., keep average CPU at 50%). AWS automatically adds/removes instances. Simplest to configure, recommended default.
+  - *Step Scaling*: Define step adjustments triggered by CloudWatch alarms at different thresholds (e.g., +2 at CPU > 70%, +4 at CPU > 90%).
+  - *Scheduled Scaling*: Pre-set capacity changes at known times (e.g., scale up before 9 AM on weekdays).
+  - *Predictive Scaling*: Uses ML to forecast load based on historical patterns, proactively scaling before load arrives.
+- **Lifecycle Hooks**: Pause instances during launch (to warm up app) or termination (to drain connections, upload logs) and execute custom actions (SSM Run Command, Lambda) before the instance is registered/deregistered from the load balancer.
+- **Warm Pools**: Pre-initialized, stopped instances ready to start quickly. Reduces scale-out latency for instances with slow startup scripts (app servers, JVM warmup). Warm pool instances are not charged full running-instance rates when stopped.
+
+### AWS Lambda
+
+Lambda runs code in response to events without provisioning or managing servers. Key performance concepts:
+
+**Concurrency**: Lambda scales by creating parallel execution environments. Each environment handles one request at a time.
+- *Unreserved concurrency*: Shared pool across all functions in the account/region (default 1,000 per region, can be raised).
+- *Reserved concurrency*: Guarantees a set number of concurrent executions for a function, isolating it from other functions consuming the shared pool. Also acts as a cap — prevents runaway scaling.
+- *Provisioned concurrency*: Pre-initializes execution environments so they are warm and ready. Eliminates cold start latency. Charged per hour for provisioned capacity. Essential for latency-sensitive APIs.
+
+**Cold Starts**: Occur when a new execution environment must be initialized (function not previously invoked, concurrency scaled up, deployment updated). Cold start adds initialization time (package download, runtime init, handler init). Provisioned concurrency eliminates cold starts. Using smaller deployment packages, avoiding large imports at module level, and choosing lighter runtimes (Node.js, Python vs. Java) reduces cold start duration.
+
+**Lambda@Edge**: Lambda functions that run at CloudFront edge locations. Triggered by CloudFront events: Viewer Request, Viewer Response, Origin Request, Origin Response. Supported runtimes: Node.js, Python. Max execution time: 5 seconds (Viewer) / 30 seconds (Origin). Used for: URL rewrites/redirects, auth at the edge, header manipulation, A/B testing.
+
+**CloudFront Functions**: Lighter-weight alternative to Lambda@Edge. Executes only at Viewer Request/Viewer Response. Written in JavaScript (ECMAScript 5.1 subset). Sub-millisecond execution. 10x cheaper than Lambda@Edge. Suitable for simple header manipulation, URL normalization, lightweight auth token validation. **Cannot** make network calls or access external resources.
+
+### Amazon ECS
+
+ECS manages containerized workloads on AWS. A **Task Definition** is a blueprint: Docker image, CPU/memory, port mappings, environment variables, IAM task role, logging configuration. A **Service** runs and maintains a specified number of tasks, integrates with ALB/NLB for load balancing, and manages rolling deployments.
+
+**Launch Types:**
+- **Fargate**: AWS manages the underlying compute. No EC2 instances to provision, patch, or scale. Billed per vCPU and memory per second. Ideal for teams without EC2 expertise or workloads needing per-task isolation.
+- **EC2 Launch Type**: Tasks run on EC2 instances you manage. More control over instance types, host networking, placement, GPU. Better price-performance for large, predictable workloads using Reserved/Savings Plans.
+
+**Capacity Providers**: Abstract the launch type, allowing ECS to scale Fargate or EC2 Spot/On-Demand capacity in response to task placement needs. Capacity provider strategies define the base and weight for mixing Fargate + Spot.
+
+### Amazon EKS
+
+EKS is a managed Kubernetes control plane. AWS manages etcd, API server, scheduler, and controller manager. Workers run in your VPC.
+
+- **Managed Node Groups**: EC2 instances managed by EKS — AWS handles node provisioning, AMI updates, and draining for upgrades. Workers join the cluster automatically.
+- **Self-Managed Nodes**: Full control over node configuration, instance types, and bootstrap scripts. Requires more operational overhead.
+- **EKS Fargate Profiles**: Run Kubernetes pods on AWS Fargate. No node management. Define a profile with namespace/label selectors; matching pods are scheduled on Fargate.
+- **Karpenter**: Open-source node provisioner that directly provisions EC2 instances based on pending pod requirements — faster and more efficient than the Kubernetes Cluster Autoscaler.
+
+## Decision Flow
+
+```
+What is the compute primitive?
+  Long-running VM workload → EC2
+    High CPU → C family
+    High memory → R/X family
+    GPU/ML training → P/G family
+    ML inference → Inf family
+    General purpose → M family
+    Spiky, low baseline → T family
+  Containerized workload → ECS or EKS
+    No Kubernetes expertise → ECS
+    Need Kubernetes ecosystem → EKS
+    No server management → Fargate launch type
+    Cost-optimized, predictable → EC2 launch type
+  Event-driven, short-lived → Lambda
+    Latency-sensitive → Enable Provisioned Concurrency
+    Run at CloudFront edge → Lambda@Edge (complex) or CloudFront Functions (simple)
+
+EC2 placement:
+  Lowest latency between instances → Cluster placement group
+  Fault isolation, critical instances → Spread placement group (max 7/AZ)
+  Distributed system rack awareness → Partition placement group
+
+Auto Scaling policy:
+  Unknown load pattern → Target Tracking (simplest)
+  Tiered response to different load levels → Step Scaling
+  Known load schedule → Scheduled Scaling
+  Forecasted load (ML-based) → Predictive Scaling
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create a Launch Template and Auto Scaling Group
+
+```bash
+# Create a Launch Template
+aws ec2 create-launch-template \
+  --launch-template-name MyAppTemplate \
+  --version-description "v1" \
+  --launch-template-data '{
+    "ImageId": "ami-0c55b159cbfafe1f0",
+    "InstanceType": "c7i.xlarge",
+    "SecurityGroupIds": ["sg-0abc123"],
+    "IamInstanceProfile": {"Name": "MyAppInstanceProfile"},
+    "UserData": "'$(base64 -w0 startup.sh)'"
+  }'
+
+# Create an Auto Scaling Group with Target Tracking
+aws autoscaling create-auto-scaling-group \
+  --auto-scaling-group-name MyAppASG \
+  --launch-template LaunchTemplateName=MyAppTemplate,Version='$Latest' \
+  --min-size 2 \
+  --max-size 20 \
+  --desired-capacity 4 \
+  --vpc-zone-identifier "subnet-0aa1,subnet-0bb2,subnet-0cc3" \
+  --target-group-arns arn:aws:elasticloadbalancing:us-east-1:123456789:targetgroup/MyApp/abc123
+
+# Attach a Target Tracking policy (keep CPU at 50%)
+aws autoscaling put-scaling-policy \
+  --auto-scaling-group-name MyAppASG \
+  --policy-name CPUTargetTrackingPolicy \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{
+    "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ASGAverageCPUUtilization"
+    },
+    "TargetValue": 50.0
+  }'
+```
+
+### Create a Cluster Placement Group
+
+```bash
+# Create a cluster placement group
+aws ec2 create-placement-group \
+  --group-name MyHPCCluster \
+  --strategy cluster
+
+# Launch instances into the placement group
+aws ec2 run-instances \
+  --image-id ami-0c55b159cbfafe1f0 \
+  --count 4 \
+  --instance-type c7i.8xlarge \
+  --placement GroupName=MyHPCCluster \
+  --network-interfaces '[{
+    "DeviceIndex": 0,
+    "SubnetId": "subnet-0aa1",
+    "Groups": ["sg-0abc123"]
+  }]'
+```
+
+### Enable Lambda Provisioned Concurrency
+
+```bash
+# Publish a Lambda function version
+aws lambda publish-version \
+  --function-name MyAPIFunction
+
+# Enable provisioned concurrency on the version
+aws lambda put-provisioned-concurrency-config \
+  --function-name MyAPIFunction \
+  --qualifier 1 \
+  --provisioned-concurrent-executions 10
+
+# Check status (wait for READY state)
+aws lambda get-provisioned-concurrency-config \
+  --function-name MyAPIFunction \
+  --qualifier 1
+```
+
+### Deploy a Fargate ECS Service
+
+```bash
+# Register a task definition
+aws ecs register-task-definition \
+  --family my-web-app \
+  --network-mode awsvpc \
+  --requires-compatibilities FARGATE \
+  --cpu "256" \
+  --memory "512" \
+  --execution-role-arn arn:aws:iam::123456789:role/ecsTaskExecutionRole \
+  --container-definitions '[{
+    "name": "web",
+    "image": "nginx:latest",
+    "portMappings": [{"containerPort": 80, "protocol": "tcp"}],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/my-web-app",
+        "awslogs-region": "us-east-1",
+        "awslogs-stream-prefix": "ecs"
+      }
+    }
+  }]'
+
+# Create ECS service on Fargate
+aws ecs create-service \
+  --cluster MyCluster \
+  --service-name my-web-service \
+  --task-definition my-web-app:1 \
+  --desired-count 3 \
+  --launch-type FARGATE \
+  --network-configuration '{
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-0aa1", "subnet-0bb2"],
+      "securityGroups": ["sg-0abc123"],
+      "assignPublicIp": "DISABLED"
+    }
+  }' \
+  --load-balancers '[{
+    "targetGroupArn": "arn:aws:elasticloadbalancing:...",
+    "containerName": "web",
+    "containerPort": 80
+  }]'
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Cluster placement group constraints**: All instances must be in the **same AZ**; requires enhanced networking (ENA). If a capacity error occurs, stop all instances and restart to trigger re-placement. The question "lowest network latency between instances" → cluster placement group.
+- **Spread placement group limit**: Maximum **7 instances per Availability Zone** per spread group. Used for small sets of critical instances requiring maximum fault isolation. "Ensure no two instances share hardware" → spread placement group.
+- **Lambda cold starts and provisioned concurrency**: Cold starts occur when no warm execution environment is available. Provisioned concurrency pre-warms environments at a cost. Reserved concurrency limits max concurrency (throttles, does NOT warm environments). A question about eliminating Lambda latency spikes → provisioned concurrency.
+- **Fargate vs EC2 launch type**: Fargate = no instances to manage, billed per task vCPU/memory-second. EC2 launch type = more control, supports GPU, placement groups, and host networking, better price for large steady workloads. Questions about "no EC2 management" or "serverless containers" → Fargate.
+- **T-series Unlimited mode**: Enables sustained CPU above baseline but incurs charges when CPU credits are depleted. Standard mode throttles when credits run out at no extra charge. Exam scenarios involving unexpected charges on T-type instances usually involve Unlimited mode.
+
+## Common Traps
+
+- **Reserved concurrency ≠ provisioned concurrency**: Reserved concurrency *caps* the number of concurrent executions (throttles above the limit). It does NOT pre-warm environments. Provisioned concurrency pre-initializes environments to eliminate cold starts. Many questions use both terms — read carefully.
+- **Lambda@Edge vs CloudFront Functions**: CloudFront Functions run only at Viewer Request/Response stages and cannot make network calls. Lambda@Edge runs at all four CloudFront event stages and can make outbound network calls but is 10x more expensive. "Simple URL rewrite at the edge" → CloudFront Functions. "Authentication with an external identity provider at the edge" → Lambda@Edge.
+- **Cluster placement group same-AZ limitation**: If you need both low latency AND high availability across AZs, a cluster placement group alone does not provide HA. Combine with multi-AZ architecture — one cluster placement group per AZ, with application-level replication between them.
+</ExamAngle>
+
+<Flashcard front="What is the maximum number of instances per AZ in a spread placement group?" back="7 instances per Availability Zone per spread placement group. Spread groups place each instance on distinct underlying hardware (separate racks)." />
+<Flashcard front="What is the difference between reserved concurrency and provisioned concurrency in Lambda?" back="Reserved concurrency caps the maximum concurrent executions for a function (throttles above limit, does NOT warm environments). Provisioned concurrency pre-initializes execution environments to eliminate cold start latency (charged per hour)." />
+<Flashcard front="When should you choose ECS Fargate over EC2 launch type?" back="Fargate when you want no EC2 instance management, per-task billing, and quick deployment. EC2 launch type when you need GPU instances, placement groups, host networking, Windows containers, or want to optimize cost with Reserved Instances/Savings Plans." />
+<Flashcard front="What does an EC2 Auto Scaling warm pool do?" back="Maintains a pool of pre-initialized stopped (or running) instances that can be quickly started to handle scale-out events, reducing scale-out latency for applications with slow initialization times (JVM warmup, large config downloads)." />
+<Flashcard front="Which placement group is best for Hadoop/Cassandra rack awareness?" back="Partition placement group — divides instances into logical partitions (up to 7 per AZ), each partition uses distinct underlying hardware. Applications can query partition metadata to perform rack-aware replica placement." />
+
+{/* QUIZ
+[
+  {
+    "id": "d3-2-q01",
+    "objective": "3.2 — High-Performing Compute Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A tightly-coupled HPC simulation runs MPI across 64 EC2 instances and requires the lowest possible network latency between all nodes. Which EC2 placement strategy should be used?",
+    "options": [
+      { "id": "A", "text": "Spread placement group across three Availability Zones" },
+      { "id": "B", "text": "Partition placement group with 8 partitions" },
+      { "id": "C", "text": "Cluster placement group in a single Availability Zone" },
+      { "id": "D", "text": "No placement group; rely on default EC2 placement" }
+    ],
+    "correct": ["C"],
+    "rationale": "A cluster placement group packs instances onto hardware that is physically close together within a single AZ, delivering the lowest network latency (potentially sub-10 microseconds) and highest bandwidth between instances. This is the recommended placement for tightly-coupled HPC and MPI workloads. Spread and partition groups prioritize fault isolation over latency.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html",
+    "tags": ["ec2", "placement-groups", "cluster", "hpc"]
+  },
+  {
+    "id": "d3-2-q02",
+    "objective": "3.2 — High-Performing Compute Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A REST API Lambda function experiences intermittent high latency on the first request after a period of inactivity. The SLA requires consistent response times under 100 ms. What is the MOST effective solution?",
+    "options": [
+      { "id": "A", "text": "Set reserved concurrency to 100 for the function" },
+      { "id": "B", "text": "Enable provisioned concurrency on the function version" },
+      { "id": "C", "text": "Increase the function's memory allocation to 3008 MB" },
+      { "id": "D", "text": "Schedule a CloudWatch Events rule to invoke the function every 5 minutes" }
+    ],
+    "correct": ["B"],
+    "rationale": "Provisioned concurrency pre-initializes Lambda execution environments, eliminating cold start latency. Reserved concurrency caps max concurrency but does not pre-warm environments. Increasing memory speeds up execution after init but does not eliminate the cold start init phase. Scheduled pings ('keep-warm hacks') are unreliable and not a supported AWS solution for eliminating cold starts.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html",
+    "tags": ["lambda", "cold-start", "provisioned-concurrency", "performance"]
+  },
+  {
+    "id": "d3-2-q03",
+    "objective": "3.2 — High-Performing Compute Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company wants to run containerized microservices without managing EC2 instances. The workload has variable traffic with occasional peaks. Which compute option minimizes operational overhead while optimizing cost?",
+    "options": [
+      { "id": "A", "text": "ECS with EC2 launch type using Reserved Instances" },
+      { "id": "B", "text": "ECS with Fargate launch type" },
+      { "id": "C", "text": "EKS with managed node groups" },
+      { "id": "D", "text": "EC2 Auto Scaling group with custom AMI" }
+    ],
+    "correct": ["B"],
+    "rationale": "ECS with Fargate requires no EC2 instance management — no patching, no capacity planning. Tasks are billed per vCPU and memory per second, making it cost-efficient for variable workloads. EKS with managed nodes still requires EC2 node management. EC2 launch type requires managing the underlying instances. An ASG with custom AMI is the highest operational overhead option.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html",
+    "tags": ["ecs", "fargate", "containers", "serverless"]
+  },
+  {
+    "id": "d3-2-q04",
+    "objective": "3.2 — High-Performing Compute Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "An Auto Scaling group needs to scale out quickly during sudden traffic spikes. New instances require 8 minutes to install software and warm up the application before they can serve traffic. What feature reduces perceived scale-out latency?",
+    "options": [
+      { "id": "A", "text": "Target Tracking scaling policy with a low target value" },
+      { "id": "B", "text": "EC2 Auto Scaling warm pools" },
+      { "id": "C", "text": "Predictive scaling with a 24-hour forecast" },
+      { "id": "D", "text": "Lifecycle hooks that pause instance termination" }
+    ],
+    "correct": ["B"],
+    "rationale": "Warm pools maintain a set of pre-initialized stopped instances. During scale-out, these instances start (fast) rather than launching fresh from an AMI (slow). The 8-minute initialization has already been done, so the instance is ready almost immediately. Target tracking addresses when to scale, not how fast. Predictive scaling helps anticipate load but still relies on normal launch time if warm pools aren't used. Lifecycle hooks on termination do not help scale-out speed.",
+    "sourceUrl": "https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-warm-pools.html",
+    "tags": ["auto-scaling", "warm-pools", "scale-out", "performance"]
+  },
+  {
+    "id": "d3-2-q05",
+    "objective": "3.2 — High-Performing Compute Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A Lambda function needs to perform complex authentication by calling an external OAuth identity provider for every CloudFront viewer request. Which edge compute option supports this requirement?",
+    "options": [
+      { "id": "A", "text": "CloudFront Functions at the Viewer Request stage" },
+      { "id": "B", "text": "Lambda@Edge at the Viewer Request stage" },
+      { "id": "C", "text": "CloudFront Functions at the Origin Request stage" },
+      { "id": "D", "text": "AWS WAF with a managed rule group" }
+    ],
+    "correct": ["B"],
+    "rationale": "Lambda@Edge supports network calls to external services (like an OAuth provider), runs at all four CloudFront event stages, and has up to 5 seconds execution time at Viewer events. CloudFront Functions cannot make network calls to external resources — they are restricted to lightweight in-memory processing only. AWS WAF can filter based on rules but cannot make authenticated calls to external identity providers.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-the-edge.html",
+    "tags": ["lambda-at-edge", "cloudfront-functions", "edge-compute", "authentication"]
+  }
+]
+*/}

@@ -1,0 +1,812 @@
+[
+  {
+    "id": "m2-d1-q01",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's security policy requires that IAM users can only perform actions when accessing AWS from the corporate network (IP range 203.0.113.0/24). An IAM administrator creates a condition on all policies. Which IAM condition key enforces this for both the Console and API calls?",
+    "options": [
+      { "id": "A", "text": "aws:SourceIp with the corporate CIDR block" },
+      { "id": "B", "text": "aws:VpcSourceIp with the corporate CIDR block" },
+      { "id": "C", "text": "aws:RequestedRegion restricted to the corporate region" },
+      { "id": "D", "text": "aws:PrincipalOrgID limited to the corporate organization" }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because aws:SourceIp checks the IP address of the caller for all requests, including Console logins and API calls made from outside the AWS network. B (aws:VpcSourceIp) only applies to requests made through a VPC endpoint, not general internet API calls. C (aws:RequestedRegion) restricts which regions can be accessed, not which network can make requests. D (aws:PrincipalOrgID) restricts access to principals within an organization.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html",
+    "tags": ["iam", "condition-keys", "source-ip", "network-restriction"]
+  },
+  {
+    "id": "m2-d1-q02",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a multi-account AWS environment. The security team wants to ensure that S3 buckets in all member accounts can only be accessed by principals within the same AWS organization, even if a bucket policy accidentally grants public access. Which control achieves this?",
+    "options": [
+      { "id": "A", "text": "Enable S3 Block Public Access on all accounts using AWS Config aggregator." },
+      { "id": "B", "text": "Apply an SCP that denies s3:GetObject unless the aws:PrincipalOrgID condition matches the organization ID." },
+      { "id": "C", "text": "Use an S3 resource-based policy with aws:PrincipalOrgID condition on every bucket across all accounts." },
+      { "id": "D", "text": "Enable Amazon Macie on all accounts to detect and remediate public bucket access." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because an SCP with a Deny on S3 actions unless the caller's PrincipalOrgID matches is applied at the organization level, overriding any permissive bucket policies in member accounts. It prevents access from outside the organization regardless of bucket configuration. A (Block Public Access) prevents anonymous access but does not restrict access to organization principals only. C requires updating every bucket policy across all accounts — operationally infeasible. D (Macie) is detective, not preventive.",
+    "sourceUrl": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps_examples_s3.html",
+    "tags": ["scp", "organizations", "s3", "principal-org-id"]
+  },
+  {
+    "id": "m2-d1-q03",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "multi",
+    "stem": "A company wants to implement a zero-trust security model for EC2 instances accessing internal APIs. Instances should authenticate without stored credentials, and access should be audited. Which TWO components are required? (Choose 2)",
+    "options": [
+      { "id": "A", "text": "IAM roles with instance profiles for temporary STS credentials." },
+      { "id": "B", "text": "AWS CloudTrail enabled to log all API calls made by the instance role." },
+      { "id": "C", "text": "IAM users with programmatic access keys stored in ~/.aws/credentials." },
+      { "id": "D", "text": "AWS Systems Manager Session Manager for shell access without SSH keys." }
+    ],
+    "correct": ["A", "B"],
+    "rationale": "A is correct because IAM instance profiles provide temporary, automatically rotated credentials via IMDS — no stored credentials required, satisfying zero-trust. B is correct because CloudTrail logs every API action taken by the instance role, providing the required audit trail. C contradicts zero-trust by using stored credentials. D (SSM Session Manager) is excellent for secure shell access without SSH but does not address API authentication for the instances themselves.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html",
+    "tags": ["iam-role", "cloudtrail", "zero-trust", "instance-profile"]
+  },
+  {
+    "id": "m2-d1-q04",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to implement envelope encryption for application data using AWS KMS. The application encrypts millions of small records per day. Which approach correctly implements envelope encryption?",
+    "options": [
+      { "id": "A", "text": "Call KMS Encrypt for each record, passing the plaintext data to KMS directly." },
+      { "id": "B", "text": "Generate a data key using KMS GenerateDataKey, encrypt the data locally with the plaintext data key, store the encrypted data key with the record, then discard the plaintext key from memory." },
+      { "id": "C", "text": "Store the CMK ID in the database and use it as the encryption key directly in the application." },
+      { "id": "D", "text": "Use KMS to generate a key pair, encrypt each record with the public key, and decrypt with the private key." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct and is the definition of envelope encryption. The data is encrypted locally using a unique data key (DEK), and only the small encrypted DEK is sent to/from KMS. This reduces KMS API calls, costs, and latency. A calls KMS for every record — KMS has a 4 KB data limit per Encrypt call and this approach is slow and expensive. C exposes the CMK ID as a key material, which is incorrect. D (asymmetric key pair) is for digital signatures or key exchange, not symmetric bulk data encryption.",
+    "sourceUrl": "https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#enveloping",
+    "tags": ["kms", "envelope-encryption", "data-key", "encryption"]
+  },
+  {
+    "id": "m2-d1-q05",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's application stores API keys in AWS Secrets Manager. When the application calls the API, it retrieves the secret each time. During a load test, the team notices increased latency due to Secrets Manager calls. What should be implemented to reduce latency without compromising security?",
+    "options": [
+      { "id": "A", "text": "Hard-code the API key in the application for the duration of the load test." },
+      { "id": "B", "text": "Use the AWS Secrets Manager SDK with built-in client-side caching to cache the secret in memory." },
+      { "id": "C", "text": "Retrieve the secret once at application startup and store it in an environment variable." },
+      { "id": "D", "text": "Store the API key in AWS Systems Manager Parameter Store Standard tier instead." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because the AWS Secrets Manager SDK provides a client-side caching library (SecretsManagerCachingClient) that caches secrets in memory with a configurable TTL, reducing the number of API calls to Secrets Manager and eliminating per-request latency. A (hard-coding) is a security violation. C (environment variable) caches indefinitely and does not respond to secret rotation. D (Parameter Store) would also suffer from per-request latency unless cached — and still requires caching logic.",
+    "sourceUrl": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets.html",
+    "tags": ["secrets-manager", "caching", "performance", "api-key"]
+  },
+  {
+    "id": "m2-d1-q06",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uses AWS SSO (IAM Identity Center) to manage access for 500 users across 20 AWS accounts. A new employee joins the finance team and needs read-only access to AWS Cost Explorer in all 20 accounts. What is the MOST efficient way to grant this access?",
+    "options": [
+      { "id": "A", "text": "Create an IAM user in each of the 20 accounts and attach a read-only Cost Explorer policy." },
+      { "id": "B", "text": "Create a Permission Set in IAM Identity Center with the CostExplorerReadOnly policy and assign it to the user with scope of all 20 accounts." },
+      { "id": "C", "text": "Use an SCP to grant Cost Explorer read access to the finance team across all accounts." },
+      { "id": "D", "text": "Generate cross-account IAM roles in all 20 accounts and share the assume-role links with the employee." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because IAM Identity Center (AWS SSO) Permission Sets allow defining access once and assigning it across multiple accounts in a single operation. The user gets temporary credentials scoped to their assignment. A requires creating and managing 20 separate IAM users — operationally expensive. C (SCPs) are for restricting, not granting permissions; they cannot grant permissions. D requires creating 20 separate roles and manually sharing access — not scalable.",
+    "sourceUrl": "https://docs.aws.amazon.com/singlesignon/latest/userguide/permissionsetsconcept.html",
+    "tags": ["iam-identity-center", "sso", "permission-set", "multi-account"]
+  },
+  {
+    "id": "m2-d1-q07",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company migrates an application to AWS and must ensure that all data in transit between the application and the RDS database is encrypted. The application uses JDBC connections. How should encryption in transit be configured for RDS?",
+    "options": [
+      { "id": "A", "text": "Enable RDS encryption at rest — this automatically encrypts data in transit." },
+      { "id": "B", "text": "Download the AWS RDS CA certificate bundle and configure the JDBC connection string to use SSL/TLS with certificate verification." },
+      { "id": "C", "text": "Enable AWS VPN between the application server and RDS endpoint." },
+      { "id": "D", "text": "Use VPC security groups to restrict RDS access — security groups encrypt traffic by default." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because RDS supports SSL/TLS connections and provides a CA certificate bundle for client-side certificate verification. The application must be configured to connect with SSL by specifying the certificate and using ssl=true in the JDBC connection string. A (encryption at rest) encrypts stored data, not data in transit. C (VPN) encrypts traffic at the network layer but the application would still need SSL configured for end-to-end database encryption. D (security groups) control network access and do not encrypt traffic.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html",
+    "tags": ["rds", "ssl-tls", "encryption-in-transit", "jdbc"]
+  },
+  {
+    "id": "m2-d1-q08",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to restrict access to an S3 bucket so that only a specific Lambda function (using its execution role ARN) can read objects. No other principals, including the account root, should have access. What is the BEST way to implement this?",
+    "options": [
+      { "id": "A", "text": "Attach a resource-based bucket policy with an explicit Deny for everyone except the Lambda execution role ARN." },
+      { "id": "B", "text": "Enable S3 Block Public Access and configure the Lambda function with the right IAM permissions." },
+      { "id": "C", "text": "Use VPC Endpoint policy to restrict S3 access to only the Lambda function's subnet." },
+      { "id": "D", "text": "Encrypt the S3 bucket with a KMS key that only grants Decrypt permission to the Lambda role." }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because a bucket policy with an explicit Deny on all principals except the Lambda execution role ARN (using Condition NotPrincipal or explicit structure) effectively restricts access. Combined with IAM allowing the Lambda role access, this double-layer ensures only the Lambda can read objects. B (Block Public Access) only prevents anonymous access, not IAM principals. C (VPC Endpoint policy) restricts by network but not by specific role ARN. D (KMS key policy) is a good additional layer but does not prevent other principals from accessing unencrypted operations on the bucket.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies.html",
+    "tags": ["s3", "bucket-policy", "lambda", "least-privilege"]
+  },
+  {
+    "id": "m2-d1-q09",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company must ensure that AWS KMS keys used to encrypt production data are never exported outside of AWS and cannot be used unless specific conditions are met (e.g., called from within a specific VPC). Which KMS feature enforces these controls?",
+    "options": [
+      { "id": "A", "text": "KMS Key Policy with condition keys aws:SourceVpc and aws:SourceIp" },
+      { "id": "B", "text": "KMS Grant that delegates key usage to specific IAM roles" },
+      { "id": "C", "text": "KMS Key Policy combined with condition key aws:SourceVpce to restrict to a VPC endpoint" },
+      { "id": "D", "text": "KMS External Key Store (XKS) to store key material outside AWS" }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because KMS key policies support condition keys like kms:CallerAccount, aws:SourceVpce, and aws:PrincipalOrgID. Using aws:SourceVpce in the key policy ensures KMS API calls must originate from within the specified VPC endpoint. AWS-managed CMKs cannot be exported — key material never leaves KMS HSMs. A (aws:SourceVpc) is less precise than aws:SourceVpce for KMS. B (Grants) delegate usage permissions but are not condition-based network restrictions. D (XKS) stores key material outside AWS, which is the opposite of the requirement.",
+    "sourceUrl": "https://docs.aws.amazon.com/kms/latest/developerguide/kms-vpc-endpoint.html",
+    "tags": ["kms", "key-policy", "vpc-endpoint", "condition-keys"]
+  },
+  {
+    "id": "m2-d1-q10",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company wants to allow developers to deploy Lambda functions but not create or modify IAM roles. However, the Lambda deployment requires associating an execution role. How can this be achieved using least-privilege IAM?",
+    "options": [
+      { "id": "A", "text": "Grant developers iam:CreateRole and iam:AttachRolePolicy to create Lambda execution roles." },
+      { "id": "B", "text": "Grant developers lambda:CreateFunction with a condition iam:PassedToService=lambda.amazonaws.com, and pre-create approved execution roles they can reference." },
+      { "id": "C", "text": "Grant developers the AdministratorAccess policy so they can manage Lambda and IAM together." },
+      { "id": "D", "text": "Use AWS Service Control Policies to prevent all IAM operations in the developer account." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because iam:PassRole with a condition iam:PassedToService restricting to lambda.amazonaws.com allows developers to associate only pre-approved Lambda execution roles without being able to create new IAM roles or escalate privileges. A grants full IAM role creation, enabling privilege escalation. C violates least privilege. D (SCP) blocking all IAM operations would also block the role association needed for Lambda deployment.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_actions-resources-contextkeys.html",
+    "tags": ["iam", "passrole", "lambda", "least-privilege"]
+  },
+  {
+    "id": "m2-d1-q11",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A financial services firm needs to prevent any principal in their AWS Organizations from disabling AWS Security Hub, AWS Config, and Amazon GuardDuty across all member accounts. Which control achieves this with the LEAST operational overhead?",
+    "options": [
+      { "id": "A", "text": "Deploy a Lambda function triggered by CloudWatch Events that re-enables these services when they are disabled." },
+      { "id": "B", "text": "Create AWS Config rules that evaluate and report when these services are disabled." },
+      { "id": "C", "text": "Attach an SCP to the root OU that denies the disable/stop actions for Security Hub, Config, and GuardDuty." },
+      { "id": "D", "text": "Enable AWS Control Tower and use the Strongly Recommended guardrails for these services." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because a single SCP attached to the root OU applies to all member accounts and all principals (except the management account), preventing disablement with the lowest overhead — no infrastructure to maintain. A (Lambda reactive) does not prevent the action; it only remediates after the fact. B (Config rules) are detective. D (Control Tower guardrails) can work but requires Control Tower to be set up and the guardrails for these specific services must be individually enabled.",
+    "sourceUrl": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps_examples_general.html",
+    "tags": ["scp", "organizations", "security-hub", "guardrails"]
+  },
+  {
+    "id": "m2-d1-q12",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company receives audit findings that RDS snapshots are not encrypted. All new RDS instances have encryption enabled. How can the company encrypt the existing unencrypted RDS snapshots?",
+    "options": [
+      { "id": "A", "text": "Enable encryption on the existing RDS instance — this will retroactively encrypt existing snapshots." },
+      { "id": "B", "text": "Copy the unencrypted snapshot and specify encryption with a KMS CMK during the copy operation, then restore from the encrypted copy." },
+      { "id": "C", "text": "Use AWS Backup to re-encrypt existing RDS snapshots in place." },
+      { "id": "D", "text": "Apply a KMS key policy to the snapshot to make it encrypted." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because RDS does not support in-place encryption of existing unencrypted instances or snapshots. The workaround is to copy the snapshot specifying a KMS key — the copy becomes encrypted. A new encrypted instance can then be restored from the encrypted snapshot. A is incorrect — enabling encryption on a running instance does not encrypt existing snapshots. C (AWS Backup) cannot re-encrypt existing snapshots in place. D (KMS key policy) manages access to KMS keys, not RDS snapshot encryption.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html",
+    "tags": ["rds", "encryption", "snapshot", "kms"]
+  },
+  {
+    "id": "m2-d1-q13",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company uses API Gateway with Lambda integration. They need to authenticate mobile users using their existing identity provider (Google OAuth). The API should validate tokens without requiring the company to manage the token validation logic. Which API Gateway feature handles this?",
+    "options": [
+      { "id": "A", "text": "API Gateway Lambda Authorizer with a custom validation function." },
+      { "id": "B", "text": "API Gateway Amazon Cognito User Pool Authorizer." },
+      { "id": "C", "text": "API Gateway Resource Policies to allow only authenticated requests." },
+      { "id": "D", "text": "API Gateway Mutual TLS (mTLS) with client certificates." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Amazon Cognito User Pools support federation with external identity providers (Google, Apple, SAML, OIDC). A Cognito User Pool Authorizer on API Gateway validates JWT tokens issued by Cognito (after Google OAuth) without any custom code. A (Lambda Authorizer) can be made to work but requires writing and maintaining token validation code. C (Resource Policies) restrict access by IP or VPC, not by user authentication. D (mTLS) is for mutual certificate-based authentication, typically for machine-to-machine.",
+    "sourceUrl": "https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-integrate-with-cognito.html",
+    "tags": ["api-gateway", "cognito", "oauth", "authorizer"]
+  },
+  {
+    "id": "m2-d1-q14",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company has an application running on EC2 in a private subnet that needs to retrieve parameters from AWS Systems Manager Parameter Store. The VPC has no internet access. Which solution allows access to Parameter Store without internet connectivity?",
+    "options": [
+      { "id": "A", "text": "Add an internet gateway to the private subnet's route table." },
+      { "id": "B", "text": "Create a VPC Interface Endpoint for AWS Systems Manager (com.amazonaws.region.ssm)." },
+      { "id": "C", "text": "Use a NAT Gateway in the public subnet." },
+      { "id": "D", "text": "Use S3 Transfer Acceleration to tunnel SSM requests." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because a VPC Interface Endpoint (PrivateLink) for SSM creates a private endpoint inside the VPC, allowing EC2 instances to call Parameter Store APIs without any internet connectivity. A (internet gateway in private subnet) would make the subnet public. C (NAT Gateway) provides internet access but the requirement specifies no internet access. D (Transfer Acceleration) is for S3 uploads and unrelated to SSM.",
+    "sourceUrl": "https://docs.aws.amazon.com/systems-manager/latest/userguide/setup-create-vpc.html",
+    "tags": ["vpc-endpoint", "ssm", "parameter-store", "private-connectivity"]
+  },
+  {
+    "id": "m2-d1-q15",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company is deploying a serverless application using Lambda and DynamoDB. The security team requires that data written to DynamoDB is encrypted at rest using a key the company manages and can rotate. Which configuration satisfies this?",
+    "options": [
+      { "id": "A", "text": "DynamoDB default encryption (AWS owned keys) which encrypts all data automatically." },
+      { "id": "B", "text": "DynamoDB encryption at rest with a Customer Managed Key (CMK) in AWS KMS." },
+      { "id": "C", "text": "Encrypt the DynamoDB table name with a KMS key to protect access." },
+      { "id": "D", "text": "Use DynamoDB Streams to export data to an encrypted S3 bucket." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because DynamoDB supports encryption at rest with customer-managed KMS keys (CMK). This gives the company full control over key policy, auditing (via CloudTrail), and the ability to rotate the key. A (AWS owned keys) encrypts data but the company has no control or visibility over the key. C — encrypting the table name is not a valid concept. D (Streams to encrypted S3) moves data but does not encrypt the DynamoDB table itself.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/EncryptionAtRest.html",
+    "tags": ["dynamodb", "encryption", "cmk", "kms"]
+  },
+  {
+    "id": "m2-d1-q16",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a public-facing application on EC2. After a penetration test, the security team finds that the EC2 metadata service (IMDSv1) is being used, which is vulnerable to SSRF attacks. How should this be mitigated?",
+    "options": [
+      { "id": "A", "text": "Disable the EC2 instance metadata service entirely." },
+      { "id": "B", "text": "Enforce IMDSv2 (require session-oriented requests) on all EC2 instances." },
+      { "id": "C", "text": "Move the EC2 instances to a private subnet to prevent SSRF exploitation." },
+      { "id": "D", "text": "Attach a WAF to the EC2 instance's security group." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because IMDSv2 requires a session token obtained via a PUT request before any metadata can be accessed. This PUT-then-GET flow cannot be forged by server-side SSRF attacks (which typically follow redirects via GET only), mitigating the vulnerability. A (disabling IMDS) would break IAM role credential retrieval for the instance. C (private subnet) reduces attack surface but does not fix the SSRF/IMDS vulnerability if the application is compromised from inside. D — WAF cannot be attached to security groups; it attaches to CloudFront, ALB, or API Gateway.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
+    "tags": ["imdsv2", "ssrf", "ec2", "metadata-service"]
+  },
+  {
+    "id": "m2-d1-q17",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's IAM administrator wants to test a new IAM policy before attaching it to production users. They want to simulate whether the policy would allow or deny a specific action without actually making the call. Which tool should be used?",
+    "options": [
+      { "id": "A", "text": "AWS Trusted Advisor to review IAM policy recommendations." },
+      { "id": "B", "text": "IAM Policy Simulator to test policies against specific actions and resources." },
+      { "id": "C", "text": "AWS Config to evaluate policy compliance against managed rules." },
+      { "id": "D", "text": "Amazon Inspector to scan IAM policies for vulnerabilities." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because the IAM Policy Simulator lets administrators test IAM policies by simulating API calls for specific actions and resources, showing whether the policy would Allow or Deny without making actual AWS API calls. A (Trusted Advisor) provides recommendations but does not simulate specific policy decisions. C (Config) evaluates resource compliance but does not simulate IAM decisions. D (Inspector) scans for software vulnerabilities, not IAM policy outcomes.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_testing-policies.html",
+    "tags": ["iam", "policy-simulator", "testing", "security"]
+  },
+  {
+    "id": "m2-d1-q18",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to ensure that when an Amazon S3 presigned URL is used to upload objects, only the intended user can use the URL and it cannot be shared. They want to bind the presigned URL to the uploader's IP address. How can this be achieved?",
+    "options": [
+      { "id": "A", "text": "Set a very short expiration time (5 minutes) on the presigned URL." },
+      { "id": "B", "text": "Generate the presigned URL from an IAM role and include an aws:SourceIp condition in the role's session policy." },
+      { "id": "C", "text": "Enable S3 Block Public Access which prevents presigned URL misuse." },
+      { "id": "D", "text": "Use an S3 bucket policy with a deny for all non-HTTPS requests." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because when generating a presigned URL using temporary credentials from an IAM role, you can attach a session policy that includes an aws:SourceIp condition restricting usage to a specific IP address. Requests from other IPs will be denied. A (short expiration) reduces the window of misuse but does not bind to an IP. C (Block Public Access) prevents anonymous access but does not restrict presigned URL usage to specific IPs. D (HTTPS-only policy) enforces transport security, not IP binding.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html",
+    "tags": ["s3", "presigned-url", "session-policy", "ip-restriction"]
+  },
+  {
+    "id": "m2-d1-q19",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company hosts a web application behind CloudFront and an ALB. The security team needs to ensure that the ALB only accepts traffic originating from CloudFront and not directly from the internet. Which configuration enforces this?",
+    "options": [
+      { "id": "A", "text": "Associate a WAF ACL with the ALB that blocks all traffic not from CloudFront IP ranges." },
+      { "id": "B", "text": "Configure CloudFront to add a custom HTTP header with a secret value and configure the ALB listener rule to forward only requests containing that header value." },
+      { "id": "C", "text": "Move the ALB to a private subnet so it cannot receive direct internet traffic." },
+      { "id": "D", "text": "Enable AWS Shield Advanced on the ALB to filter non-CloudFront traffic." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because configuring CloudFront to inject a custom HTTP header with a secret value, and configuring the ALB listener rule to only forward requests that contain that header, prevents direct internet bypass. CloudFront IP ranges change frequently, making IP-based filtering (A) operationally complex. C (private ALB) would make the ALB unreachable by CloudFront as well unless using PrivateLink. D (Shield Advanced) protects against DDoS but does not filter origin traffic.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/restrict-access-to-load-balancer.html",
+    "tags": ["cloudfront", "alb", "custom-header", "origin-restriction"]
+  },
+  {
+    "id": "m2-d1-q20",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company requires all IAM users to use MFA when accessing the AWS Management Console, but some developers have bypassed this by using CLI access keys directly. How should MFA be enforced for CLI/API calls as well?",
+    "options": [
+      { "id": "A", "text": "Enable virtual MFA devices for all IAM users — this automatically applies to CLI calls." },
+      { "id": "B", "text": "Add a Deny condition to IAM policies with aws:MultiFactorAuthPresent set to false for all sensitive actions." },
+      { "id": "C", "text": "Configure AWS Organizations SCPs to require MFA for all API calls." },
+      { "id": "D", "text": "Enable MFA on the root account to cascade MFA requirements to all users." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because adding a Deny with the condition aws:MultiFactorAuthPresent: false to IAM policies means that any API call (including CLI calls) that does not include a valid MFA session token will be denied. Users must use sts:GetSessionToken with MFA to get temporary credentials before making API calls. A (enabling MFA devices) registers the device but does not enforce its use for API calls. C (SCPs) cannot check MFA status — SCPs do not support the aws:MultiFactorAuthPresent condition. D (root MFA) only protects the root account.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html",
+    "tags": ["iam", "mfa", "multi-factor-auth", "cli"]
+  },
+  {
+    "id": "m2-d2-q01",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to design a database layer for a new application that requires 99.99% availability, sub-millisecond read latency, and the ability to handle a sudden 10x write traffic spike without pre-provisioning. Which database solution best meets all requirements?",
+    "options": [
+      { "id": "A", "text": "Amazon RDS Aurora MySQL Multi-AZ with read replicas." },
+      { "id": "B", "text": "Amazon DynamoDB Global Tables with DAX for caching and on-demand capacity mode." },
+      { "id": "C", "text": "Amazon ElastiCache Redis cluster in cluster mode with Multi-AZ." },
+      { "id": "D", "text": "Amazon RDS PostgreSQL with Provisioned IOPS and Multi-AZ." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because DynamoDB Global Tables provides 99.999% SLA, DAX delivers sub-millisecond read latency, and on-demand capacity mode handles sudden write spikes without pre-provisioning. A (Aurora) provides high availability but cannot handle 10x spikes instantly without pre-provisioning capacity. C (ElastiCache) is a cache, not a primary database. D (RDS PostgreSQL) cannot handle sudden 10x write spikes without scaling events.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html",
+    "tags": ["dynamodb", "global-tables", "dax", "on-demand"]
+  },
+  {
+    "id": "m2-d2-q02",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's application deployment pipeline takes 45 minutes to deploy new EC2 AMIs via Auto Scaling. During a disaster, this delay in standing up new instances is unacceptable. They currently use Backup and Restore DR. Which DR strategy improvement reduces RTO while balancing cost?",
+    "options": [
+      { "id": "A", "text": "Switch to Multi-Site Active/Active with full production capacity in two regions." },
+      { "id": "B", "text": "Implement Pilot Light by keeping the core database running in the DR region and pre-baking AMIs with the application stack." },
+      { "id": "C", "text": "Keep daily automated snapshots in the DR region and restore from the latest snapshot." },
+      { "id": "D", "text": "Deploy the same Auto Scaling pipeline in the DR region triggered by a CloudWatch alarm." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Pilot Light keeps the database replica running at all times (eliminating data recovery delay) and pre-baked AMIs eliminate the 45-minute build time by having the application stack ready to launch. This significantly reduces RTO compared to Backup and Restore, at much lower cost than Active/Active. A (Multi-Site) has the best RTO but highest cost. C is still Backup and Restore with a 45-minute build time. D only automates the same slow 45-minute deployment in the DR region.",
+    "sourceUrl": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html",
+    "tags": ["disaster-recovery", "pilot-light", "rto", "ami"]
+  },
+  {
+    "id": "m2-d2-q03",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company processes real-time stock trade events. Each event must trigger multiple workflows: risk analysis (Lambda), trade audit log (Kinesis Data Firehose), and notification to traders (SNS). The event producer should not need to know about consumers. Which architecture achieves this?",
+    "options": [
+      { "id": "A", "text": "Publish events to an SQS Standard queue and have each workflow poll independently." },
+      { "id": "B", "text": "Publish events to EventBridge with a rule that fans out to Lambda, Kinesis Firehose, and SNS targets simultaneously." },
+      { "id": "C", "text": "Write events to a Kinesis Data Stream with three separate consumer applications." },
+      { "id": "D", "text": "Have the producer call Lambda, Kinesis Firehose, and SNS directly using the AWS SDK." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because EventBridge decouples the producer from consumers — the producer publishes events to a bus and EventBridge routes to multiple targets based on rules. This satisfies the fan-out requirement with full producer/consumer decoupling. A (SQS) delivers each message to only one consumer. C (Kinesis) requires each consumer to poll and manage checkpoints. D tightly couples the producer to all consumers, violating the requirement.",
+    "sourceUrl": "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-targets.html",
+    "tags": ["eventbridge", "fan-out", "decoupling", "event-driven"]
+  },
+  {
+    "id": "m2-d2-q04",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a critical application that requires zero RPO (no data loss) and zero RTO (no downtime) during a regional AWS failure. What architecture achieves this?",
+    "options": [
+      { "id": "A", "text": "Aurora Global Database with automated cross-region failover scripted with Lambda." },
+      { "id": "B", "text": "Multi-Site Active/Active with DynamoDB Global Tables, Route 53 health checks with latency routing, and stateless EC2 instances in two regions." },
+      { "id": "C", "text": "RDS Multi-AZ deployment within a single region with automated backups." },
+      { "id": "D", "text": "Warm Standby in a secondary region with 15-minute RTO and 1-minute RPO." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Multi-Site Active/Active means both regions serve live traffic simultaneously. DynamoDB Global Tables replicates data with sub-second lag (approaching zero RPO). Route 53 health checks with latency routing redirect traffic to the surviving region within seconds (approaching zero RTO). A (Aurora Global) requires promoting the secondary, which takes ~1 minute — not zero RTO. C (Multi-AZ) protects against AZ failure, not regional failure. D explicitly has non-zero RTO/RPO.",
+    "sourceUrl": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html",
+    "tags": ["disaster-recovery", "active-active", "zero-rto", "multi-region"]
+  },
+  {
+    "id": "m2-d2-q05",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "An order processing system uses SQS and Lambda. During a flash sale, the SQS queue depth grows from 100 to 500,000 messages in minutes. Lambda concurrency is hitting the account limit. What is the BEST design change to prevent Lambda throttling?",
+    "options": [
+      { "id": "A", "text": "Increase the SQS visibility timeout to reduce duplicate processing." },
+      { "id": "B", "text": "Set Lambda Reserved Concurrency to the maximum account limit." },
+      { "id": "C", "text": "Configure an SQS-triggered Lambda with a concurrency limit and use an auto-scaling Lambda Provisioned Concurrency that scales based on SQS queue depth metric." },
+      { "id": "D", "text": "Switch to SQS FIFO to process messages in order and throttle the incoming rate." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because setting a reserved concurrency cap protects downstream systems from being overwhelmed, and Provisioned Concurrency scaled by the SQS queue depth (via Application Auto Scaling) ensures warm Lambda instances are ready before the queue grows, reducing cold starts under burst. A (visibility timeout) prevents duplicates but does not address throttling. B (maximum reserved concurrency) exhausts account limits affecting other functions. D (FIFO) enforces ordering and throttles throughput but limits scalability during a flash sale.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/scaling.html",
+    "tags": ["lambda", "sqs", "concurrency", "provisioned-concurrency"]
+  },
+  {
+    "id": "m2-d2-q06",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a microservices architecture with 15 services calling each other synchronously via REST APIs. When one service slows down, all dependent services queue up connections and eventually fail. Which pattern prevents cascading failures?",
+    "options": [
+      { "id": "A", "text": "Increase timeout values for all service-to-service calls to tolerate slow responses." },
+      { "id": "B", "text": "Implement a circuit breaker pattern with exponential backoff in each service client." },
+      { "id": "C", "text": "Add more instances of the slow service using Auto Scaling." },
+      { "id": "D", "text": "Use SQS between all services to convert synchronous calls to asynchronous." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because the circuit breaker pattern detects failures in downstream calls and opens the circuit (stops sending requests to the failing service) after a threshold, preventing connection pool exhaustion in callers. Exponential backoff allows the failing service to recover. A (increasing timeouts) worsens the problem by holding connections longer. C (scaling the slow service) helps eventually but does not immediately stop cascading failures. D (SQS decoupling) fundamentally changes the architecture and may not be suitable for all synchronous request-response patterns.",
+    "sourceUrl": "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/circuit-breaker.html",
+    "tags": ["circuit-breaker", "resilience", "microservices", "fault-tolerance"]
+  },
+  {
+    "id": "m2-d2-q07",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "multi",
+    "stem": "A company is redesigning their e-commerce platform to handle Black Friday traffic. The current monolithic application becomes overwhelmed by checkout requests. Which TWO architectural changes most improve scalability and resilience? (Choose 2)",
+    "options": [
+      { "id": "A", "text": "Break the checkout service into an independent microservice behind an SQS queue to absorb traffic spikes." },
+      { "id": "B", "text": "Use Auto Scaling for the monolithic application to add more instances during peak load." },
+      { "id": "C", "text": "Cache product catalog data in ElastiCache Redis to reduce database reads for browse traffic." },
+      { "id": "D", "text": "Increase the RDS instance class to handle more concurrent checkout connections." }
+    ],
+    "correct": ["A", "C"],
+    "rationale": "A is correct because decoupling checkout into an SQS-backed microservice absorbs traffic spikes asynchronously, preventing the checkout bottleneck from affecting the rest of the application. C is correct because caching the read-heavy product catalog in ElastiCache dramatically reduces database load during high-browse periods (pre-checkout), freeing database capacity for transactions. B (scaling the monolith) addresses compute but not architectural bottlenecks. D (larger RDS) is a vertical scaling approach with limits and does not address the architectural problem.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-getting-started.html",
+    "tags": ["microservices", "sqs", "elasticache", "scalability"]
+  },
+  {
+    "id": "m2-d2-q08",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company migrates their on-premises Oracle database to AWS. The application requires read-heavy analytics queries that cannot be run on the production database. The RPO must be less than 5 minutes. Which solution should be used?",
+    "options": [
+      { "id": "A", "text": "RDS Oracle Multi-AZ deployment with the standby instance used for analytics." },
+      { "id": "B", "text": "RDS Oracle with Read Replicas, running analytics queries against the read replicas." },
+      { "id": "C", "text": "Take hourly RDS snapshots and restore them to a separate instance for analytics." },
+      { "id": "D", "text": "Use DMS to continuously replicate data to an Aurora PostgreSQL instance for analytics." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because RDS Read Replicas use asynchronous replication with typical lag of seconds to minutes, satisfying the 5-minute RPO. Analytics queries can be directed to the read replica without impacting the production primary. A (Multi-AZ standby) cannot be used for queries — the standby is not accessible for reads. C (hourly snapshots) has an RPO of up to 60 minutes, violating the 5-minute requirement. D (DMS to Aurora) requires schema migration from Oracle and is a more complex migration path.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+    "tags": ["rds", "read-replica", "analytics", "rpo"]
+  },
+  {
+    "id": "m2-d2-q09",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company is building a new feature that sends welcome emails when a user registers. The user registration API should not be delayed by the email sending process. Which architecture pattern best achieves this?",
+    "options": [
+      { "id": "A", "text": "Call the email service synchronously from the registration API and use a 30-second timeout." },
+      { "id": "B", "text": "Publish a UserRegistered event to SNS from the registration service; the email service subscribes to the topic and processes it asynchronously." },
+      { "id": "C", "text": "Use a background thread in the registration service to send emails after the API response." },
+      { "id": "D", "text": "Call Amazon SES directly from the registration API with a fire-and-forget pattern." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because publishing to SNS decouples the registration service from the email service. The registration API returns immediately after publishing, and the email service processes asynchronously at its own pace. This improves API response time and allows independent scaling and failure isolation. A (synchronous call) introduces latency and coupling. C (background thread) is not reliable in stateless or containerized environments and does not survive instance failure. D (fire-and-forget SES) has no retry or failure handling.",
+    "sourceUrl": "https://docs.aws.amazon.com/sns/latest/dg/sns-common-scenarios.html",
+    "tags": ["sns", "decoupling", "async", "event-driven"]
+  },
+  {
+    "id": "m2-d2-q10",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's ALB health checks are failing for EC2 instances that are running healthy but have a slow startup time (60 seconds) for the application process. Instances are being terminated and replaced before they are ready. What should be configured?",
+    "options": [
+      { "id": "A", "text": "Increase the ALB health check interval to 120 seconds." },
+      { "id": "B", "text": "Configure the Auto Scaling Group's health check grace period to allow instances time to initialize before health checks begin." },
+      { "id": "C", "text": "Disable ALB health checks and use EC2 status checks only." },
+      { "id": "D", "text": "Reduce the ALB health check unhealthy threshold to 1 check." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because the Auto Scaling Group Health Check Grace Period defines how long ASG waits after an instance launches before starting health checks. Setting it to at least 90–120 seconds allows the application to complete its 60-second startup without premature termination. A (increasing ALB check interval) delays health check frequency but does not delay the first check after launch. C (disabling ALB health checks) loses application-level health visibility. D (threshold of 1) would make instances terminated after a single failed check, making the problem worse.",
+    "sourceUrl": "https://docs.aws.amazon.com/autoscaling/ec2/userguide/healthcheck.html",
+    "tags": ["auto-scaling", "health-check-grace-period", "alb", "instance-startup"]
+  },
+  {
+    "id": "m2-d2-q11",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company processes IoT sensor data from 10,000 devices. Each device sends 10 messages per second. The data must be processed in near real-time, maintaining message order per device. Which AWS service is MOST appropriate for ingesting and processing this data stream?",
+    "options": [
+      { "id": "A", "text": "Amazon SQS Standard queues with one queue per device." },
+      { "id": "B", "text": "Amazon Kinesis Data Streams with device ID as the partition key." },
+      { "id": "C", "text": "Amazon SQS FIFO queues with device ID as the message group ID." },
+      { "id": "D", "text": "Amazon SNS with a topic per device and Lambda subscribers." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Kinesis Data Streams uses the partition key (device ID) to route all messages from the same device to the same shard, guaranteeing per-device ordering. It handles 100,000 messages/second (10,000 devices × 10 msg/s) and supports real-time processing with Lambda, KCL, or Kinesis Data Analytics. A (one SQS per device) is unmanageable at 10,000 devices. C (SQS FIFO) is limited to 3,000 msg/s per queue, insufficient for 100,000 msg/s. D (SNS per device) creates 10,000 topics — operationally unmanageable.",
+    "sourceUrl": "https://docs.aws.amazon.com/streams/latest/dev/key-concepts.html",
+    "tags": ["kinesis", "iot", "partition-key", "ordering"]
+  },
+  {
+    "id": "m2-d2-q12",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's Aurora PostgreSQL cluster experiences high CPU and read latency during business hours due to analytical queries run by the BI team. Write performance must not be impacted. Which architectural change BEST isolates the analytical workload?",
+    "options": [
+      { "id": "A", "text": "Schedule the BI team's queries to run during off-peak hours (midnight)." },
+      { "id": "B", "text": "Add Aurora Replicas with the custom endpoint configured for the BI team and use the main cluster endpoint for application writes and OLTP reads." },
+      { "id": "C", "text": "Upgrade the Aurora cluster to a larger instance size." },
+      { "id": "D", "text": "Use DynamoDB Accelerator (DAX) to cache BI query results." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Aurora custom endpoints allow creating a dedicated endpoint pointing to specific reader instances. The BI team connects to the custom endpoint (pointing to high-memory read replicas) while the application uses the writer and reader endpoints. This isolates analytical query CPU/memory impact to dedicated replicas. A (off-peak scheduling) does not solve the problem during business hours. C (larger instance) is more expensive and does not isolate workloads. D (DAX) is for DynamoDB, not Aurora.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.Endpoints.html#Aurora.Endpoints.Custom",
+    "tags": ["aurora", "custom-endpoint", "read-replica", "workload-isolation"]
+  },
+  {
+    "id": "m2-d2-q13",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company wants to orchestrate a multi-step workflow: validate an order, charge payment, reserve inventory, and send a confirmation email. Each step can fail and should trigger compensation actions (e.g., refund if inventory is unavailable). Which AWS service is designed for this pattern?",
+    "options": [
+      { "id": "A", "text": "AWS Lambda with Step Functions Standard Workflow using catch/retry states and compensating transactions." },
+      { "id": "B", "text": "Amazon SQS chained queues where each step publishes to the next queue." },
+      { "id": "C", "text": "Amazon EventBridge Pipes connecting DynamoDB Streams to Lambda for each step." },
+      { "id": "D", "text": "AWS Batch job queue with dependencies between job steps." }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because AWS Step Functions Standard Workflows provide visual orchestration with built-in retry logic, catch states for error handling, and the ability to invoke compensating Lambda functions on failure (saga pattern). State history is retained for 90 days. B (chained SQS) lacks built-in orchestration, error handling, or compensation logic — each step must be manually coordinated. C (EventBridge Pipes) is for event-driven filtering/routing, not complex workflow orchestration with compensation. D (Batch) is for containerized batch jobs, not transactional workflow orchestration.",
+    "sourceUrl": "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-standard-vs-express.html",
+    "tags": ["step-functions", "saga-pattern", "orchestration", "workflow"]
+  },
+  {
+    "id": "m2-d2-q14",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company has multiple AWS accounts managed by Organizations. Each account has its own VPC and needs to share a centralized egress point (single NAT Gateway) for internet access. Which architecture achieves centralized egress with the least number of NAT Gateways?",
+    "options": [
+      { "id": "A", "text": "Deploy a NAT Gateway in each account's public subnet." },
+      { "id": "B", "text": "Create a shared services VPC with a NAT Gateway, connect all VPCs via Transit Gateway, and route internet-bound traffic through the shared VPC." },
+      { "id": "C", "text": "Use VPC Peering from each account to a central VPC with internet access." },
+      { "id": "D", "text": "Deploy AWS Direct Connect in the central account and route all internet traffic on-premises." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because a centralized egress architecture using Transit Gateway and a shared services VPC with a single NAT Gateway reduces NAT Gateway costs from N NAT Gateways (one per account) to one. Spoke VPCs have a default route pointing to the TGW, which routes to the centralized NAT. A (NAT per account) is the current state — most expensive. C (VPC Peering) does not support transitive routing — you cannot route from VPC A through VPC B to the internet using peering. D (Direct Connect) routes to on-premises, adding latency and complexity for internet access.",
+    "sourceUrl": "https://aws.amazon.com/blogs/networking-and-content-delivery/centralized-egress-with-aws-transit-gateway/",
+    "tags": ["transit-gateway", "nat-gateway", "centralized-egress", "multi-account"]
+  },
+  {
+    "id": "m2-d2-q15",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company ingests clickstream data from a website into Kinesis Data Streams. A Lambda function processes each record but the function is failing for 5% of records due to malformed data. These failed records block shard processing (the iterator does not advance). How should this be handled?",
+    "options": [
+      { "id": "A", "text": "Increase Lambda timeout to 15 minutes to allow retries for each failed record." },
+      { "id": "B", "text": "Configure the Lambda event source mapping with a bisect-on-error and on-failure destination (SQS or S3) to isolate failed records." },
+      { "id": "C", "text": "Delete the Kinesis stream and recreate it without the malformed records." },
+      { "id": "D", "text": "Use SQS instead of Kinesis to automatically handle failed records with a DLQ." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Lambda's Kinesis event source mapping supports BisectBatchOnFunctionError (splits the batch to isolate the failing record) and DestinationConfig with an OnFailure destination (SQS or S3) to capture failed records for analysis. This allows the shard iterator to advance past the problematic records. A (increasing timeout) does not prevent the shard from blocking on malformed data. C (deleting the stream) causes data loss. D (switching to SQS) changes the architecture and loses Kinesis ordering guarantees.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/with-kinesis.html",
+    "tags": ["kinesis", "lambda", "bisect-on-error", "failure-handling"]
+  },
+  {
+    "id": "m2-d2-q16",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs an application in us-east-1 with an RDS MySQL Multi-AZ database. The application team wants to prepare for a complete us-east-1 regional failure. The maximum acceptable data loss is 1 minute (RPO=1min) and maximum downtime is 10 minutes (RTO=10min). Which solution meets these requirements?",
+    "options": [
+      { "id": "A", "text": "Create a cross-region RDS Read Replica in us-west-2. On disaster, promote the replica and update the application connection string." },
+      { "id": "B", "text": "Use RDS automated backups with cross-region backup replication to us-west-2 and restore on disaster." },
+      { "id": "C", "text": "Enable Aurora Global Database with a secondary in us-west-2 and automated failover scripts." },
+      { "id": "D", "text": "Use RDS Multi-AZ — it automatically fails over within the region in under 2 minutes." }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because RDS cross-region Read Replicas use asynchronous replication with typical lag under 1 minute (meeting RPO=1min). Promoting a Read Replica to a standalone primary takes approximately 5–10 minutes, meeting RTO=10min. The application connection string must be updated, but this can be automated with Route 53. B (restoring from cross-region backups) takes 30+ minutes. C (Aurora Global) has better RPO/RTO but requires switching from MySQL RDS to Aurora. D (Multi-AZ) only protects against AZ failure within the same region, not regional failure.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.XRgn.html",
+    "tags": ["rds", "cross-region-replica", "disaster-recovery", "rpo-rto"]
+  },
+  {
+    "id": "m2-d2-q17",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company wants to gracefully handle a downstream service being temporarily unavailable. When the payment service returns an error, the order service should retry 3 times with exponential backoff before failing. Which AWS service or feature natively provides this capability for Lambda-to-Lambda calls?",
+    "options": [
+      { "id": "A", "text": "AWS Step Functions with retry configuration on the payment task state." },
+      { "id": "B", "text": "Lambda destination on failure to send to an SQS queue for manual retry." },
+      { "id": "C", "text": "Configure Lambda asynchronous invocation with maximum retry attempts of 3." },
+      { "id": "D", "text": "Use SQS with a visibility timeout as the retry mechanism." }
+    ],
+    "correct": ["A"],
+    "rationale": "A is correct because Step Functions task states have a Retry field that configures retry attempts, interval, backoff rate, and max attempts natively. This provides structured orchestration with retries and fallback states. B (Lambda failure destination) sends to SQS after all retries are exhausted, not for structured retry logic. C (Lambda async retry) retries the entire Lambda function, not a specific downstream call within the function. D (SQS visibility timeout) is a queue-based retry, not structured retry within a workflow.",
+    "sourceUrl": "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html",
+    "tags": ["step-functions", "retry", "exponential-backoff", "resilience"]
+  },
+  {
+    "id": "m2-d3-q01",
+    "objective": "3.2 — Determine High-Performing and Scalable Compute Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs ECS Fargate tasks that process video encoding jobs. Jobs take 4–6 hours and require 16 vCPU and 120 GB memory. The team needs to run up to 50 concurrent jobs during peak periods. Which Fargate configuration is MOST cost-effective?",
+    "options": [
+      { "id": "A", "text": "Use Fargate with On-Demand pricing and set the task size to 16 vCPU / 120 GB." },
+      { "id": "B", "text": "Use Fargate Spot with On-Demand fallback for the encoding tasks." },
+      { "id": "C", "text": "Use ECS with EC2 launch type and Reserved Instances for the encoding cluster." },
+      { "id": "D", "text": "Run encoding jobs on AWS Lambda with 15-minute maximum execution limit." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Fargate Spot uses spare Fargate capacity at up to 70% discount. Video encoding jobs, while important, can be restarted if interrupted (modern encoders support checkpointing). On-Demand fallback ensures jobs complete even when Spot capacity is unavailable. A (On-Demand Fargate) is the most expensive option for batch workloads that can tolerate interruption. C (EC2 Reserved Instances) adds cluster management overhead. D (Lambda) has a 15-minute maximum execution limit, far shorter than the 4–6 hour job duration.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html",
+    "tags": ["fargate-spot", "ecs", "cost-optimization", "batch-processing"]
+  },
+  {
+    "id": "m2-d3-q02",
+    "objective": "3.3 — Determine High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company migrates from a relational database to DynamoDB. Queries require retrieving all orders for a customer (UserID) within a specific date range. The table currently uses UserID as the partition key. What should be added to support efficient date-range queries?",
+    "options": [
+      { "id": "A", "text": "Add a Global Secondary Index (GSI) with OrderDate as the partition key and UserID as the sort key." },
+      { "id": "B", "text": "Use UserID as the partition key and OrderDate as the sort key; use the Query operation with a KeyConditionExpression." },
+      { "id": "C", "text": "Scan the entire table and filter by UserID and date in the application." },
+      { "id": "D", "text": "Add a Local Secondary Index (LSI) with UserID as the partition key and a different sort key." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because using a composite primary key (UserID as partition key + OrderDate as sort key) enables efficient range queries using the Query API with KeyConditionExpression: UserID = :id AND OrderDate BETWEEN :start AND :end. This is the most efficient DynamoDB access pattern. A (GSI with OrderDate as PK) distributes orders across the GSI poorly and cannot efficiently query by UserID+date together. C (Scan) reads the entire table — extremely expensive and slow. D (LSI) requires the same partition key as the base table but a different sort key — this is essentially the same as B if designed correctly, but the question implies the table currently only has UserID as PK.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.html",
+    "tags": ["dynamodb", "sort-key", "composite-key", "range-query"]
+  },
+  {
+    "id": "m2-d3-q03",
+    "objective": "3.4 — Determine High-Performing and Scalable Network Architectures",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company needs to serve personalized content from CloudFront. The content must be customized based on the viewer's geographic location and device type (mobile vs desktop). The logic must run with minimal latency. Which solution should be used?",
+    "options": [
+      { "id": "A", "text": "Use CloudFront Cache Behaviors with separate origins for mobile and desktop." },
+      { "id": "B", "text": "Use Lambda@Edge at the viewer request event to redirect or rewrite URLs based on CloudFront-Viewer-Country and User-Agent headers." },
+      { "id": "C", "text": "Use an ALB in each region with rules based on User-Agent header." },
+      { "id": "D", "text": "Use AWS Global Accelerator to route mobile and desktop users to different endpoints." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because Lambda@Edge at the viewer request event runs at the nearest CloudFront edge location, adding zero additional round-trips. It can read CloudFront-Viewer-Country (injected by CloudFront) and User-Agent headers to personalize content or redirect requests, with minimal latency. A (cache behaviors) can use different origins but cannot dynamically inspect and route based on runtime request headers without code. C (ALB in each region) requires routing to a region first, adding latency. D (Global Accelerator) routes based on network proximity, not request content.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-the-edge.html",
+    "tags": ["cloudfront", "lambda-at-edge", "personalization", "geolocation"]
+  },
+  {
+    "id": "m2-d3-q04",
+    "objective": "3.1 — Determine High-Performing and Scalable Storage Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A financial services company needs a shared file system for Windows applications running on EC2. The file system must support Active Directory authentication, DFS namespaces, and Windows ACLs. Which storage solution meets these requirements?",
+    "options": [
+      { "id": "A", "text": "Amazon EFS with Windows-compatible settings." },
+      { "id": "B", "text": "Amazon FSx for Windows File Server with Active Directory integration." },
+      { "id": "C", "text": "Amazon S3 with S3 Access Points for Windows authentication." },
+      { "id": "D", "text": "Amazon EBS io2 volumes with Multi-Attach enabled." }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because FSx for Windows File Server is a fully managed Windows native file system built on SMB protocol with native AD integration, DFS namespaces, Windows ACLs, and shadow copies. A (EFS) uses NFS protocol — Windows EC2 instances can mount it but it does not support SMB, Windows ACLs, or DFS natively. C (S3) is object storage and does not support file system semantics or Windows AD. D (EBS Multi-Attach) supports concurrent access for up to 16 instances but does not provide a shared file system with Windows authentication.",
+    "sourceUrl": "https://docs.aws.amazon.com/fsx/latest/WindowsGuide/what-is.html",
+    "tags": ["fsx-windows", "active-directory", "windows", "shared-storage"]
+  },
+  {
+    "id": "m2-d3-q05",
+    "objective": "3.2 — Determine High-Performing and Scalable Compute Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a high-performance computing (HPC) cluster that requires extremely high network bandwidth between EC2 nodes (100 Gbps+) for MPI workloads. Which EC2 feature provides this capability?",
+    "options": [
+      { "id": "A", "text": "Enhanced Networking with ENA (Elastic Network Adapter)" },
+      { "id": "B", "text": "Elastic Fabric Adapter (EFA) with MPI/NCCL support" },
+      { "id": "C", "text": "Placement groups with dedicated tenancy" },
+      { "id": "D", "text": "EC2 instances with 25 Gbps network interfaces" }
+    ],
+    "correct": ["B"],
+    "rationale": "B is correct because EFA is a network interface specifically designed for HPC applications that require high bandwidth, low latency, and OS-bypass capabilities. EFA supports MPI (Message Passing Interface) and NCCL (NVIDIA Collective Communications Library) directly, bypassing the OS network stack for maximum performance. A (ENA) provides enhanced networking (up to 100 Gbps) but without OS-bypass and MPI support. C (placement groups) improve proximity but do not provide OS-bypass network performance. D (25 Gbps NICs) is standard networking, not HPC-grade.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html",
+    "tags": ["efa", "hpc", "mpi", "high-performance-networking"]
+  },
+  {
+    "id": "m2-d4-q01",
+    "objective": "4.2 — Design Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a production workload on EC2 that requires a specific instance type (c5.4xlarge) in a specific AZ (us-east-1a) to be guaranteed available. They also need up to 72% savings. Which combination achieves guaranteed capacity AND maximum savings?",
+    "options": [
+      { "id": "A", "text": "Standard Reserved Instances (1-year, no upfront) for c5.4xlarge in us-east-1." },
+      { "id": "B", "text": "On-Demand Capacity Reservation in us-east-1a + Compute Savings Plans." },
+      { "id": "C", "text": "Standard Reserved Instances (3-year, all upfront) scoped to us-east-1a for c5.4xlarge." },
+      { "id": "D", "text": "Spot Instance with capacity block reservation in us-east-1a." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because zonal Standard Reserved Instances (scoped to a specific AZ) provide both the billing discount AND a capacity reservation for that specific instance type in that AZ. 3-year All Upfront provides the maximum savings (~60–72%). B (On-Demand Capacity Reservation + Savings Plans) guarantees capacity but capacity reservations are charged at On-Demand rates unless matched with an RI or Savings Plan — and Savings Plans don't directly match AZ-scoped capacity reservations. A (no upfront, region-scoped RI) does not guarantee AZ-level capacity. D (Spot with capacity block) is for short-duration GPU workloads, not standard production instances.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/reserved-instances-scope.html",
+    "tags": ["reserved-instances", "capacity-reservation", "az-scope", "cost-optimization"]
+  },
+  {
+    "id": "m2-d4-q02",
+    "objective": "4.1 — Design Cost-Optimized Storage Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs 200 EC2 instances with gp2 EBS volumes ranging from 500 GB to 2 TB. After reviewing CloudWatch metrics, they find that 80% of volumes have IOPS utilization below 20% but were provisioned for 3,000 IOPS with gp2. What is the MOST cost-effective optimization?",
+    "options": [
+      { "id": "A", "text": "Migrate all volumes from gp2 to io2 for better IOPS control." },
+      { "id": "B", "text": "Reduce the volume sizes to 100 GB to lower costs." },
+      { "id": "C", "text": "Migrate volumes from gp2 to gp3 and set IOPS to 3,000 only for volumes that need it; set lower IOPS for the 80% with low utilization." },
+      { "id": "D", "text": "Use S3 instead of EBS for all EC2 instance data." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because gp3 is cheaper than gp2 for the same size (approximately 20% lower cost per GB) and IOPS are configurable independently of volume size in gp3 (baseline 3,000 IOPS free; higher IOPS charged per IOPS-month). The 80% of underutilized volumes can use the baseline 3,000 IOPS at no extra charge. A (io2) is more expensive per GB and IOPS — appropriate for high-IOPS workloads, not underutilized general-purpose volumes. B (smaller volumes) may cause disk space issues and does not address the IOPS question. D (S3) cannot replace EC2 boot volumes.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html#gp3-ebs-volume-type",
+    "tags": ["ebs", "gp3", "cost-optimization", "iops"]
+  },
+  {
+    "id": "m2-d4-q03",
+    "objective": "4.3 — Design Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company has an RDS Aurora MySQL cluster with one writer and three reader instances. After analyzing CloudWatch metrics, they find the reader instances have less than 5% average CPU and 10% memory utilization during most of the day. What is the MOST cost-effective change?",
+    "options": [
+      { "id": "A", "text": "Switch all reader instances to Spot Instances to save 90%." },
+      { "id": "B", "text": "Remove two reader instances and use Aurora Serverless v2 for the read workload." },
+      { "id": "C", "text": "Replace the three provisioned reader instances with Aurora Auto Scaling that scales from 0 to 3 readers based on CPU metrics." },
+      { "id": "D", "text": "Enable RDS Proxy to reduce connection overhead on existing reader instances." }
+    ],
+    "correct": ["C"],
+    "rationale": "C is correct because Aurora Auto Scaling for read replicas scales the number of reader instances based on CPU or connection metrics. At 5% utilization most of the day, Auto Scaling would maintain 0–1 readers during quiet periods, significantly reducing costs versus 3 always-on readers. A — RDS Aurora Read Replicas are not available as Spot Instances. B (Serverless v2) is an option but requires switching from provisioned to Serverless billing model — Auto Scaling is less disruptive. D (RDS Proxy) reduces connection overhead but does not reduce the cost of idle reader instances.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Integrating.AutoScaling.html",
+    "tags": ["aurora", "auto-scaling", "read-replica", "cost-optimization"]
+  }
+]

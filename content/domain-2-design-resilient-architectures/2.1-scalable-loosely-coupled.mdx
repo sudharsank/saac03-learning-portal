@@ -5,6 +5,400 @@ domain: 2
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 2.1 — Design Scalable and Loosely Coupled Architectures
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Loosely coupled architectures decouple producers from consumers so that each component can scale, fail, and deploy independently without cascading failures. Instead of Service A calling Service B directly (tight coupling), Service A drops a message on a queue or publishes an event — Service B picks it up whenever it is ready. This pattern is the backbone of resilient, scalable cloud systems on AWS.
+
+The core insight is that **synchronous, direct calls create hidden dependencies**. If Service B is slow, Service A blocks. If Service B is down, Service A fails. Introducing an asynchronous messaging layer — SQS, SNS, or EventBridge — breaks that dependency chain and gives each tier room to scale at its own pace.
+
+AWS provides a rich family of managed messaging and orchestration services: Amazon SQS (durable queuing), Amazon SNS (pub/sub fan-out), Amazon EventBridge (event routing and scheduling), AWS Step Functions (workflow orchestration), and Amazon API Gateway (managed API entry point). Understanding when to reach for each service — and the precise limits that govern them — is the heart of Domain 2 on the SAA-C03 exam.
+
+## Key Components
+
+- **Amazon SQS** — Fully managed message queue. Producers enqueue; consumers poll and process. Decouples tiers and absorbs traffic spikes.
+- **Amazon SNS** — Pub/sub notification service. One message published to a topic fans out to all subscribed endpoints simultaneously.
+- **Amazon EventBridge** — Serverless event bus. Routes events from 200+ AWS services, SaaS partners, and custom sources to targets using rules and event patterns.
+- **AWS Step Functions** — Visual workflow orchestration. Coordinates Lambda functions, ECS tasks, and AWS APIs as a state machine with retry, catch, and parallel logic.
+- **Amazon API Gateway** — Managed API front door. Handles REST, HTTP, and WebSocket APIs with throttling, caching, authorisers, and Lambda/HTTP backend integration.
+- **Dead-Letter Queues (DLQ)** — SQS or SNS destinations for messages that fail processing after a configured number of attempts.
+- **Fan-Out Pattern** — SNS topic → multiple SQS queues: each queue drives an independent downstream service that processes the same event in parallel.
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Amazon SQS — Standard vs FIFO
+
+**Standard Queue**
+- **Delivery**: At-least-once — a message may be delivered more than once (duplicate handling must be in consumer logic).
+- **Order**: Best-effort — messages are usually in order but not guaranteed.
+- **Throughput**: Nearly unlimited (auto-scales).
+- **Visibility Timeout**: Default **30 seconds**, configurable 0 s – 12 hours. After a consumer retrieves a message, the message is hidden from other consumers for this duration. If processing succeeds, the consumer calls `DeleteMessage`. If processing fails or the timeout expires, the message reappears in the queue.
+- **Extend mid-flight**: Call `ChangeMessageVisibility` with a new timeout if processing takes longer than the original timeout.
+- **Message Retention**: Default **4 days**, configurable 1 minute – **14 days**.
+- **Max Message Size**: 256 KB (use S3 + SQS Extended Client Library for larger payloads).
+- **Long Polling**: Set `WaitTimeSeconds` 1–20 s on `ReceiveMessage`. Reduces empty-poll API calls and cost. **Short polling** returns immediately even with no messages.
+- **Delay Queue**: `DelaySeconds` 0–900 s on a queue (or per message in Standard). Message is invisible to consumers for that duration after being enqueued.
+
+**FIFO Queue**
+- **Delivery**: Exactly-once processing (deduplication ID prevents duplicates within 5-minute window).
+- **Order**: Strict FIFO within a Message Group ID.
+- **Throughput**: **300 TPS** baseline (3,000 TPS with batching, up to 30,000 TPS with high throughput mode).
+- **Name suffix**: Must end in `.fifo`.
+- **Message Group ID**: Required. Messages in the same group are delivered in order; different groups are processed independently.
+- **Deduplication ID**: Required (or enable content-based deduplication). Prevents duplicate sends within 5 minutes.
+
+**Dead-Letter Queue (DLQ)**
+- Set `maxReceiveCount` on a source queue's redrive policy. After a message is received that many times without deletion, it is moved to the DLQ automatically.
+- DLQ must be the same type (Standard → Standard DLQ; FIFO → FIFO DLQ).
+- Use **DLQ Redrive** (console) to replay messages back to the source queue after fixing the consumer bug.
+
+### Amazon SNS — Topics and Subscriptions
+
+- **Topics** are logical access points. Publishers send one message; SNS fans it out to all subscribers.
+- **Subscriptions** can be: SQS, Lambda, HTTP/HTTPS, email, SMS, Kinesis Data Firehose.
+- **Message Filtering**: Each subscription can have a filter policy (JSON attribute matching). Only matching messages are delivered to that subscription — reduces unwanted processing.
+- **Message Durability**: SNS retries failed HTTP/S deliveries with exponential backoff. For SQS and Lambda, delivery is guaranteed.
+- **SNS FIFO Topics**: Strictly ordered delivery to SQS FIFO queues. Up to 300 published messages/s.
+- **Fan-Out Architecture**: SNS topic → multiple SQS queues. Each queue drives a separate consumer (e.g., one for fulfilment, one for analytics, one for notifications). Producers send once; all consumers receive independently.
+
+### Amazon EventBridge
+
+- **Event Bus types**:
+  - *Default* — receives events from AWS services automatically.
+  - *Custom* — receives events your application publishes (`PutEvents` API).
+  - *Partner* — receives events from SaaS partners (Zendesk, Datadog, Stripe, etc.).
+- **Rules** evaluate incoming events against an **event pattern** (JSON subset match) or a **schedule** (cron/rate expression). Matching events are routed to one or more **targets**.
+- **Targets**: Lambda, SQS, SNS, Step Functions, Kinesis, ECS tasks, API Gateway, another event bus (cross-account/cross-region), and more.
+- **Schema Registry**: EventBridge can discover and store event schemas, enabling code binding generation.
+- **Event Replay**: Archive events and replay them to re-process historical events through updated rules.
+- **Replaces CloudWatch Events**: EventBridge is the evolution of CloudWatch Events — same underlying service, richer capabilities.
+- **Latency**: Near-real-time (typically < 500 ms).
+
+### AWS Step Functions
+
+- **State Machines** define a workflow as a JSON (Amazon States Language) definition of states: Task, Choice, Parallel, Map, Wait, Pass, Succeed, Fail.
+- **Standard Workflows**
+  - Max duration: **1 year**.
+  - Exactly-once execution semantics.
+  - Executions are auditable (full execution history visible in console).
+  - Charged per state transition.
+  - Use for long-running, critical business workflows.
+- **Express Workflows**
+  - Max duration: **5 minutes**.
+  - At-least-once (asynchronous) or at-most-once (synchronous) semantics depending on type.
+  - High-volume, short-lived workloads (IoT, streaming, high-throughput).
+  - Charged per execution duration + number of executions.
+- **Error Handling**: `Retry` (with `IntervalSeconds`, `MaxAttempts`, `BackoffRate`) and `Catch` (transition to error-handling state) built into each Task state.
+- **Activity Tasks**: Polled by an external worker — enables human approval steps or on-premises integration.
+- **Use when**: orchestrating multi-step workflows that need conditional logic, parallel branches, retries, timeouts, or human-in-the-loop steps.
+
+### Amazon API Gateway
+
+| Type | Protocol | Best For |
+|------|----------|----------|
+| REST API | HTTP/1.1 | Feature-rich: caching, usage plans, API keys, request/response transformation |
+| HTTP API | HTTP/1.1 | Low-latency, low-cost Lambda/HTTP integrations; JWT authorisers |
+| WebSocket API | WebSocket | Real-time two-way communication (chat, dashboards) |
+
+- **Throttling**: Default 10,000 RPS (requests/s) per account per region, burst 5,000. Per-stage and per-method limits configurable. Returns **429 Too Many Requests** when exceeded.
+- **Caching**: REST API only. TTL 0–3,600 s (default 300 s). Caches based on method + query params + headers. Reduces backend calls.
+- **Lambda Proxy Integration**: API Gateway passes the full HTTP request as a Lambda event object; Lambda returns a structured response `{ statusCode, headers, body }`.
+- **Stage Variables**: Like environment variables for a stage — parameterise Lambda aliases, backend URLs.
+- **Usage Plans + API Keys**: Rate limit and quota specific API consumers.
+- **Private APIs**: Accessible only from within a VPC via an Interface VPC Endpoint.
+
+## Decision Flow
+
+**Choosing between SQS, SNS, and EventBridge**
+
+| Scenario | Choose |
+|----------|--------|
+| Buffer work between tiers; consumer processes at its own pace | **SQS** |
+| Fan-out: one event → multiple independent consumers simultaneously | **SNS → SQS (fan-out)** |
+| Strict ordering and exactly-once delivery | **SQS FIFO** |
+| Route events from AWS services / SaaS / custom apps based on content | **EventBridge** |
+| Schedule a recurring serverless task (cron) | **EventBridge Scheduled Rule** |
+| Need subscription filtering to reduce per-consumer noise | **SNS with filter policies** |
+
+**Choosing between Step Functions and SQS for workflow**
+
+| Need | Choose |
+|------|--------|
+| Simple retry / async offload | SQS + Lambda |
+| Multi-step orchestration with conditional branching | Step Functions Standard |
+| High-volume, short-duration pipelines (< 5 min) | Step Functions Express |
+| Human approval or external activity | Step Functions (Activity Task) |
+
+**API Gateway type selection**
+
+| Need | Choose |
+|------|--------|
+| Full feature set (caching, API keys, usage plans) | REST API |
+| Lowest latency + cost for Lambda integration | HTTP API |
+| Bidirectional real-time streaming | WebSocket API |
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Exercise 1 — Create SQS Standard Queue with DLQ and Test Long Polling
+
+```bash
+# 1. Create the Dead-Letter Queue
+aws sqs create-queue \
+  --queue-name orders-dlq \
+  --attributes '{"MessageRetentionPeriod":"1209600"}'
+
+# Capture DLQ ARN
+DLQ_ARN=$(aws sqs get-queue-attributes \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders-dlq \
+  --attribute-names QueueArn \
+  --query 'Attributes.QueueArn' --output text)
+
+# 2. Create the main queue with redrive policy (max 3 receive attempts)
+aws sqs create-queue \
+  --queue-name orders-standard \
+  --attributes "{
+    \"VisibilityTimeout\": \"60\",
+    \"MessageRetentionPeriod\": \"345600\",
+    \"ReceiveMessageWaitTimeSeconds\": \"20\",
+    \"RedrivePolicy\": \"{\\\"deadLetterTargetArn\\\":\\\"$DLQ_ARN\\\",\\\"maxReceiveCount\\\":\\\"3\\\"}\"
+  }"
+
+# 3. Send a test message
+aws sqs send-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders-standard \
+  --message-body '{"orderId":"ORD-001","amount":99.99}' \
+  --delay-seconds 5
+
+# 4. Receive with long polling (waits up to 20s for a message)
+aws sqs receive-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders-standard \
+  --wait-time-seconds 20 \
+  --max-number-of-messages 5
+
+# 5. Delete the message after processing (use ReceiptHandle from receive output)
+aws sqs delete-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders-standard \
+  --receipt-handle "<ReceiptHandle-from-step-4>"
+```
+
+### Exercise 2 — Create FIFO Queue
+
+```bash
+# FIFO queue name MUST end in .fifo
+aws sqs create-queue \
+  --queue-name payments.fifo \
+  --attributes '{
+    "FifoQueue": "true",
+    "ContentBasedDeduplication": "true",
+    "VisibilityTimeout": "30"
+  }'
+
+# Send ordered messages in the same group
+aws sqs send-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/payments.fifo \
+  --message-body '{"step":"charge","amount":50}' \
+  --message-group-id "user-42" \
+  --message-deduplication-id "charge-user-42-001"
+
+aws sqs send-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/payments.fifo \
+  --message-body '{"step":"receipt","amount":50}' \
+  --message-group-id "user-42" \
+  --message-deduplication-id "receipt-user-42-001"
+```
+
+### Exercise 3 — SNS Fan-Out: One Topic to Two SQS Queues
+
+```bash
+# 1. Create SNS topic
+TOPIC_ARN=$(aws sns create-topic --name order-events \
+  --query 'TopicArn' --output text)
+
+# 2. Create two SQS queues
+QUEUE1_URL=$(aws sqs create-queue --queue-name fulfilment-queue \
+  --query 'QueueUrl' --output text)
+QUEUE2_URL=$(aws sqs create-queue --queue-name analytics-queue \
+  --query 'QueueUrl' --output text)
+
+QUEUE1_ARN=$(aws sqs get-queue-attributes --queue-url $QUEUE1_URL \
+  --attribute-names QueueArn --query 'Attributes.QueueArn' --output text)
+QUEUE2_ARN=$(aws sqs get-queue-attributes --queue-url $QUEUE2_URL \
+  --attribute-names QueueArn --query 'Attributes.QueueArn' --output text)
+
+# 3. Subscribe both queues to the topic
+aws sns subscribe --topic-arn $TOPIC_ARN \
+  --protocol sqs --notification-endpoint $QUEUE1_ARN
+
+aws sns subscribe --topic-arn $TOPIC_ARN \
+  --protocol sqs --notification-endpoint $QUEUE2_ARN
+
+# 4. Grant SNS permission to send to both SQS queues (attach SQS policy)
+# (In practice, add an SQS policy that allows sns:SendMessage from the topic ARN)
+
+# 5. Publish ONE message — both queues receive it
+aws sns publish \
+  --topic-arn $TOPIC_ARN \
+  --message '{"event":"OrderPlaced","orderId":"ORD-002"}' \
+  --subject "Order Event"
+```
+
+### Exercise 4 — EventBridge Scheduled Rule (Run Lambda Every 5 Minutes)
+
+```bash
+# 1. Create a custom event bus (optional — can use default)
+aws events create-event-bus --name my-app-bus
+
+# 2. Create a scheduled rule on the default bus
+aws events put-rule \
+  --name "every-5-minutes" \
+  --schedule-expression "rate(5 minutes)" \
+  --state ENABLED
+
+# 3. Add Lambda as target (Lambda must exist and grant permission)
+aws events put-targets \
+  --rule "every-5-minutes" \
+  --targets '[{
+    "Id": "1",
+    "Arn": "arn:aws:lambda:us-east-1:123456789012:function:MyScheduledFunction"
+  }]'
+
+# 4. Grant EventBridge permission to invoke Lambda
+aws lambda add-permission \
+  --function-name MyScheduledFunction \
+  --statement-id EventBridgeInvoke \
+  --action lambda:InvokeFunction \
+  --principal events.amazonaws.com \
+  --source-arn arn:aws:events:us-east-1:123456789012:rule/every-5-minutes
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **SQS Standard vs FIFO selection**: A scenario requires guaranteed ordering and exactly-once processing (e.g., financial transactions) → choose **SQS FIFO**. If it says "at-least-once" or "high throughput without ordering" → **Standard**. FIFO is limited to 300 TPS (3,000 with batching).
+
+- **Visibility timeout vs message retention**: Visibility timeout hides an in-flight message from other consumers during processing (default 30 s, max 12 h). Message retention is how long an unprocessed message stays in the queue (default 4 days, max 14 days). Exam questions often conflate the two.
+
+- **Fan-out pattern**: When a question says "multiple downstream services must all process the same event independently," the answer is **SNS topic → multiple SQS queues** (not a single SQS queue polled by multiple consumers — that's competitive consumption).
+
+- **EventBridge vs SNS**: Use EventBridge when the scenario involves **routing events based on content/patterns** from AWS services or SaaS, or when **scheduling** is needed. Use SNS when the requirement is simple pub/sub fan-out to endpoints (email, SMS, Lambda, SQS).
+
+- **Step Functions for orchestration**: Any workflow needing **retries, conditional branching, parallel execution, human approval, or error handling across multiple Lambda functions** → Step Functions. Do not confuse with SQS (queueing) or SNS (notification).
+
+## Common Traps
+
+- **DLQ type mismatch**: An SQS Standard queue's DLQ must also be Standard; an SQS FIFO queue's DLQ must be FIFO. Using mismatched types is invalid — exam distractors rely on this.
+
+- **Long polling vs short polling confusion**: Short polling returns immediately (may return empty). Long polling waits up to 20 s and reduces API calls and cost. The exam will describe "unnecessary empty responses" as the problem — the fix is always enabling long polling (`ReceiveMessageWaitTimeSeconds > 0`).
+
+- **API Gateway type confusion**: HTTP API is cheaper and lower latency but does NOT support caching, usage plans, or request/response transformation. If a question requires caching or API keys with throttling per consumer, the answer is **REST API**, not HTTP API.
+</ExamAngle>
+
+<Flashcard front="SQS Standard vs FIFO — key difference" back="Standard: at-least-once delivery, best-effort ordering, near-unlimited TPS. FIFO: exactly-once, strict ordering within a Message Group ID, 300 TPS (3,000 with batching)." />
+<Flashcard front="SQS Visibility Timeout" back="Duration a message is hidden from other consumers after being received. Default 30 s, max 12 hours. Use ChangeMessageVisibility to extend mid-flight. If processing fails or times out, the message reappears." />
+<Flashcard front="SNS Fan-Out Pattern" back="Publish one message to an SNS topic; it is delivered simultaneously to all subscribed SQS queues or Lambda functions. Each subscriber processes independently — enables parallel, decoupled pipelines." />
+<Flashcard front="EventBridge vs CloudWatch Events" back="EventBridge IS the evolution of CloudWatch Events — same underlying service. EventBridge adds custom/partner event buses, schema registry, event replay, and 200+ AWS service sources." />
+<Flashcard front="Step Functions Standard vs Express" back="Standard: max 1 year, exactly-once, full audit history, charged per state transition. Express: max 5 minutes, at-least-once (async) or at-most-once (sync), high-volume pipelines, charged per duration." />
+
+{/* QUIZ
+[
+  {
+    "id": "d2-1-q01",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A financial application must process payment transactions in the exact order they are received, and each transaction must be processed exactly once. Which SQS configuration meets these requirements?",
+    "options": [
+      { "id": "A", "text": "SQS Standard queue with a visibility timeout of 0 seconds" },
+      { "id": "B", "text": "SQS FIFO queue with content-based deduplication enabled" },
+      { "id": "C", "text": "SQS Standard queue with a Dead-Letter Queue configured" },
+      { "id": "D", "text": "SQS Standard queue with long polling enabled" }
+    ],
+    "correct": ["B"],
+    "rationale": "SQS FIFO queues guarantee strict ordering within a Message Group ID and provide exactly-once processing through deduplication. Standard queues offer best-effort ordering and at-least-once delivery, which does not meet the requirements. DLQs and long polling do not affect ordering or deduplication guarantees.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues.html",
+    "tags": ["sqs", "fifo", "ordering", "deduplication"]
+  },
+  {
+    "id": "d2-1-q02",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An e-commerce platform publishes an 'OrderPlaced' event that must trigger three independent downstream services: fulfilment, analytics, and fraud detection — all in parallel. What is the most appropriate architecture?",
+    "options": [
+      { "id": "A", "text": "A single SQS Standard queue polled by all three services" },
+      { "id": "B", "text": "An SNS topic with three SQS queue subscriptions, one per service" },
+      { "id": "C", "text": "Three separate SQS queues with the producer sending the same message to each" },
+      { "id": "D", "text": "An SQS FIFO queue with a different Message Group ID for each service" }
+    ],
+    "correct": ["B"],
+    "rationale": "The SNS fan-out pattern (one SNS topic → multiple SQS queues) delivers the message to all subscribers simultaneously. Option A is wrong because a single SQS queue delivers each message to only one consumer (competitive consumption). Option C requires the producer to know all consumers, creating tight coupling. Option D uses a FIFO queue incorrectly — it does not support multiple independent consumers receiving the same message.",
+    "sourceUrl": "https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html",
+    "tags": ["sns", "sqs", "fan-out", "decoupling"]
+  },
+  {
+    "id": "d2-1-q03",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's Lambda function is receiving many empty SQS poll responses, causing unnecessary API call costs. What change will reduce empty responses most effectively?",
+    "options": [
+      { "id": "A", "text": "Increase the SQS message retention period to 14 days" },
+      { "id": "B", "text": "Enable long polling by setting ReceiveMessageWaitTimeSeconds to 20" },
+      { "id": "C", "text": "Reduce the visibility timeout to 0 seconds" },
+      { "id": "D", "text": "Switch from an SQS Standard queue to a FIFO queue" }
+    ],
+    "correct": ["B"],
+    "rationale": "Long polling (WaitTimeSeconds 1–20 s) causes the ReceiveMessage call to wait until a message is available or the timeout expires, eliminating empty responses. Short polling (default, WaitTimeSeconds = 0) returns immediately even if no messages are present, causing unnecessary API calls. Message retention, visibility timeout, and queue type do not affect polling behaviour.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html",
+    "tags": ["sqs", "long-polling", "cost-optimisation"]
+  },
+  {
+    "id": "d2-1-q04",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A microservices application needs to route events from multiple AWS services and a SaaS partner (Salesforce) to different Lambda functions based on the event content. The routing logic must be declarative and managed without code changes. Which service is the best fit?",
+    "options": [
+      { "id": "A", "text": "Amazon SQS with message attributes and a routing Lambda" },
+      { "id": "B", "text": "Amazon SNS with filter policies on each subscription" },
+      { "id": "C", "text": "Amazon EventBridge with event bus rules and event patterns" },
+      { "id": "D", "text": "AWS Step Functions with a Choice state" }
+    ],
+    "correct": ["C"],
+    "rationale": "EventBridge natively integrates with 200+ AWS services and SaaS partners via partner event buses. Rules with event patterns provide declarative, code-free content-based routing to targets. SNS filter policies work but do not support SaaS partner integrations or the rich event pattern matching EventBridge provides. SQS with a routing Lambda introduces code that must be maintained. Step Functions orchestrates workflows but is not an event router.",
+    "sourceUrl": "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html",
+    "tags": ["eventbridge", "event-driven", "routing", "saas"]
+  },
+  {
+    "id": "d2-1-q05",
+    "objective": "2.1 — Design Scalable and Loosely Coupled Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A multi-step order processing workflow involves: (1) charge payment, (2) reserve inventory, (3) notify shipping, (4) send confirmation email. If inventory reservation fails, the workflow must automatically retry up to 3 times with exponential backoff, then trigger a manual review step. Which AWS service should orchestrate this workflow?",
+    "options": [
+      { "id": "A", "text": "Amazon SQS with a Dead-Letter Queue after 3 failed receive attempts" },
+      { "id": "B", "text": "Amazon EventBridge with a rule that triggers each Lambda in sequence" },
+      { "id": "C", "text": "AWS Step Functions Standard Workflow with Retry and Catch on the inventory state" },
+      { "id": "D", "text": "AWS Step Functions Express Workflow with Retry and Catch on the inventory state" }
+    ],
+    "correct": ["C"],
+    "rationale": "Step Functions Standard Workflow is correct because: (1) it supports Retry (with MaxAttempts, BackoffRate) and Catch (to transition to a manual review state) declaratively in the state machine definition; (2) it maintains exactly-once execution semantics and full audit history needed for order processing; (3) Standard Workflows support long-running workflows (up to 1 year), which is appropriate for a human review step. Express Workflows (Option D) have a 5-minute maximum duration, which is insufficient if manual review takes longer. SQS DLQ (A) and EventBridge (B) do not provide built-in retry-with-backoff or conditional catch logic at the workflow level.",
+    "sourceUrl": "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html",
+    "tags": ["step-functions", "workflow-orchestration", "retry", "error-handling"]
+  }
+]
+*/}

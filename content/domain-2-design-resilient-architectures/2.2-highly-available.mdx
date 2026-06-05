@@ -5,6 +5,468 @@ domain: 2
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 2.2 — Design Highly Available and Fault-Tolerant Architectures
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+High availability (HA) means a system remains operational with minimal downtime even when individual components fail. Fault tolerance goes further — the system continues operating correctly even in the presence of failures, with zero data loss. On AWS, both goals are achieved by designing across multiple **Availability Zones (AZs)** within a Region and, for the highest tiers of availability, across multiple **Regions**.
+
+An AWS **Region** is a geographically separate cluster of data centres (e.g., `us-east-1`). Each Region contains at least three **Availability Zones** — physically isolated data centres with independent power, cooling, and networking, connected by low-latency links. Designing across AZs protects against data-centre-level failures; designing across Regions protects against Region-wide outages (rare but consequential).
+
+The practical building blocks of HA on AWS are: **Route 53** for DNS-level traffic steering and health checks, **Elastic Load Balancing** for distributing traffic across healthy instances, **Auto Scaling Groups** for replacing failed capacity, and **Multi-AZ database deployments** for database-tier resilience. Understanding how these pieces work together — and the precise trade-offs of each Route 53 routing policy and disaster recovery strategy — is essential for the SAA-C03 exam.
+
+## Key Components
+
+- **AWS Regions and Availability Zones** — Physical isolation boundaries. AZs are the minimum HA unit; Regions are for DR and global reach.
+- **Route 53** — AWS's managed DNS service. Supports 7 routing policies plus health checks for DNS-level failover.
+- **Elastic Load Balancing (ELB)** — Three load balancer types: ALB (Layer 7), NLB (Layer 4), and GLB (Layer 3+4 for virtual appliances).
+- **Auto Scaling Groups (ASG)** — Automatically replace unhealthy EC2 instances and scale capacity in response to demand.
+- **RDS Multi-AZ** — Synchronous standby replica in a different AZ for automatic failover. Not a read replica.
+- **Aurora Global Database** — Replication across Regions with under 1 second lag for cross-region DR or read scaling.
+- **Disaster Recovery Strategies** — Backup/Restore, Pilot Light, Warm Standby, Multi-Site Active-Active — each trading cost against RTO/RPO.
+- **S3 Cross-Region Replication (CRR)** — Asynchronous replication of S3 objects to a bucket in another Region.
+- **AWS Global Accelerator** — Network-layer acceleration using the AWS global network; static Anycast IP addresses with health-check-based failover.
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### AWS Availability Zones vs Regions
+
+- A Region is a collection of AZs in a geographic area. AZ names (e.g., `us-east-1a`) are mapped per-account — `us-east-1a` for your account may be a different physical AZ than `us-east-1a` for another account.
+- Each AZ is one or more discrete data centres with redundant power, networking, and connectivity.
+- **Best practice**: Deploy resources across a minimum of **2 AZs** (3 AZs for highest availability). ELB and ASGs span AZs automatically.
+- **Cross-Region** is for disaster recovery (RTO/RPO requirements), regulatory data residency, or serving a global user base with low latency.
+
+### Route 53 Routing Policies
+
+| Policy | How It Works | Use Case |
+|--------|-------------|----------|
+| **Simple** | Returns one or more IPs; client picks randomly if multiple. No health checks. | Single resource, no HA |
+| **Weighted** | Routes X% of traffic to each endpoint. Weights 0–255. | Blue/green deployments, A/B testing, gradual migration |
+| **Latency** | Routes to the Region with the lowest measured network latency for the client. NOT necessarily geographically nearest. | Global users — optimise response time |
+| **Failover** | Primary (Active) + Secondary (Standby). Health check on primary; if it fails, Route 53 routes to secondary. | Active/Passive DR |
+| **Geolocation** | Routes based on the geographic location of the DNS query (country/continent). Returns "No Answer" if no match and no default. | Content localisation, regulatory compliance |
+| **Geoproximity** | Routes based on geographic location, with a configurable bias to shift traffic toward/away from a resource. Requires Traffic Flow. | Shift traffic between regions gradually |
+| **Multi-Value Answer** | Returns up to 8 healthy records at random. Performs health checks and omits unhealthy endpoints. | Simple client-side load balancing (not a substitute for ELB) |
+
+**Route 53 Health Checks**
+- Monitor endpoints (HTTP, HTTPS, TCP), other health checks (calculated), or CloudWatch alarms.
+- Health check interval: 30 s (standard) or 10 s (fast, extra cost).
+- Threshold: 3 consecutive failures = unhealthy (default).
+- **Failover routing** requires a health check attached to the primary record.
+- Health checks can evaluate endpoints inside a VPC via CloudWatch alarm-based health checks.
+
+### Elastic Load Balancing
+
+**Application Load Balancer (ALB) — Layer 7**
+- Operates at HTTP/HTTPS layer; understands URL paths, hostnames, headers, query strings, and HTTP methods.
+- **Path-based routing**: `/api/*` → Lambda target group; `/images/*` → EC2 target group.
+- **Host-based routing**: `api.example.com` → one target group; `app.example.com` → another.
+- **Target types**: EC2 instances, IP addresses, Lambda functions, other ALBs (weighted).
+- Supports sticky sessions (cookie-based), WebSocket, HTTP/2.
+- **WAF integration**: Attach AWS WAF for Layer 7 DDoS and web exploit protection.
+
+**Network Load Balancer (NLB) — Layer 4**
+- Operates at TCP/UDP/TLS layer; extreme performance (millions of RPS), ultra-low latency.
+- Preserves source IP address of clients.
+- **Static IP per AZ** (or Elastic IP assignment) — useful when clients need a fixed IP/whitelist.
+- Use for: gaming, IoT, financial trading systems, anything that cannot tolerate ALB latency.
+- Supports TLS termination (offloads TLS from targets).
+
+**Gateway Load Balancer (GLB) — Layer 3+4**
+- Deploys, scales, and manages third-party virtual network appliances (firewalls, IDS/IPS, DPI).
+- Uses the **GENEVE protocol** on port 6081.
+- Transparent to traffic: traffic goes through appliances before reaching destination.
+
+**Cross-Zone Load Balancing**
+- ALB: enabled by default (no charge). Distributes traffic evenly across all registered targets in all enabled AZs.
+- NLB: disabled by default (enable per load balancer, charges apply for inter-AZ data transfer).
+
+### Auto Scaling Groups
+
+**Launch Templates** (preferred over Launch Configurations — LC are legacy)
+- Define: AMI, instance type, key pair, security groups, user data, IAM role.
+- Support multiple instance types, Spot instances, and versioning.
+
+**Scaling Policies**
+
+| Type | How It Works | Best For |
+|------|-------------|----------|
+| **Target Tracking** | Add/remove instances to keep a metric at a target value (e.g., CPU at 50%). AWS manages the scaling math. | Simplest; most exam-friendly for "maintain performance" |
+| **Step Scaling** | Scale by a defined number of instances when a CloudWatch alarm breaches a threshold. Multiple steps for different breach sizes. | More control when traffic spikes sharply |
+| **Scheduled Scaling** | Scale out at a specific time (cron expression). | Predictable load patterns (business hours, known peaks) |
+| **Predictive Scaling** | ML-based forecast uses historical data to proactively scale. | Cyclical load patterns |
+
+**Health Checks**
+- EC2 health check (default): replaces instances that fail EC2 status checks.
+- ELB health check: replaces instances that fail the load balancer's health check (more comprehensive — tests the app).
+- **Best practice**: Use ELB health checks on ASGs fronted by a load balancer.
+
+**Cooldown Period**: Default 300 s. After a scale-out, ASG waits before initiating another scaling action. Prevents thrashing.
+
+**Warm Pool**: Pre-initialised instances kept in a stopped/running state. When needed, they are activated faster than launching cold instances.
+
+### RDS Multi-AZ vs Read Replicas
+
+| Feature | Multi-AZ | Read Replica |
+|---------|----------|--------------|
+| Purpose | High availability / failover | Read scaling / offload |
+| Replication | **Synchronous** | Asynchronous |
+| Readable? | **No** (standby is passive) | **Yes** |
+| Failover | Automatic (DNS update, 1–2 min) | Manual promotion required |
+| Cross-Region | Yes (Multi-AZ Cluster) | Yes |
+| Supported engines | MySQL, PostgreSQL, Oracle, SQL Server, MariaDB | MySQL, PostgreSQL, MariaDB, Aurora |
+
+**Key exam distinction**: RDS Multi-AZ standby is NOT a read endpoint. It is passive and exists solely for failover. If you need to serve read traffic from a secondary, use a **Read Replica**.
+
+### Aurora Global Database
+
+- Primary Region handles writes; up to 5 secondary Regions handle reads.
+- Replication lag: typically **< 1 second** (storage-layer replication, not binlog).
+- **Managed Failover**: Promote a secondary Region to primary in < 1 minute (RTO ~1 min, RPO ~1 s).
+- Use for: global applications requiring low read latency in multiple regions, and for cross-region DR with aggressive RTO/RPO targets.
+
+### Disaster Recovery Strategies
+
+| Strategy | RTO | RPO | Cost | Description |
+|----------|-----|-----|------|-------------|
+| **Backup & Restore** | Hours | Hours | Lowest | Restore from S3 backups. No live infrastructure in DR region. |
+| **Pilot Light** | 10–30 min | Minutes | Low | Minimal core services running (e.g., replicated DB). Scale up remaining infrastructure during failover. |
+| **Warm Standby** | Minutes | Seconds–minutes | Medium | Scaled-down but fully functional environment running in DR region. Scale to production during failover. |
+| **Multi-Site Active-Active** | Near-zero | Near-zero | Highest | Full production capacity in both regions simultaneously. Route 53 distributes live traffic. |
+
+**RTO** (Recovery Time Objective) — how long can the business tolerate downtime?
+**RPO** (Recovery Point Objective) — how much data loss is acceptable?
+
+### S3 Cross-Region Replication (CRR)
+
+- Asynchronous replication of new objects to a bucket in another Region.
+- Requires **versioning enabled** on both source and destination buckets.
+- Can filter by prefix or object tags.
+- Does NOT retroactively replicate existing objects (use S3 Batch Replication for that).
+- Ownership: replicated objects can optionally be owned by the destination account.
+- **Same-Region Replication (SRR)**: Replicates within the same Region (compliance, log aggregation).
+
+### AWS Global Accelerator
+
+- Provides two **static Anycast IP addresses** that route to the nearest AWS edge location, then onto the AWS private network to the endpoint.
+- Supports: ALB, NLB, EC2 instances, Elastic IPs as endpoints.
+- Health checks: if an endpoint becomes unhealthy, traffic is instantly rerouted to the next healthy endpoint.
+- **vs CloudFront**: Global Accelerator accelerates TCP/UDP at the network layer (gaming, VoIP, APIs). CloudFront caches HTTP content at the edge.
+- Use when: you need static IPs, non-HTTP protocols, or deterministic routing with fast failover.
+
+## Decision Flow
+
+**Route 53 policy selection**
+
+| Requirement | Policy |
+|-------------|--------|
+| Route all traffic to one endpoint | Simple |
+| A/B test or gradual migration | Weighted |
+| Route to lowest-latency region | Latency |
+| Automatic DNS failover on health check | Failover |
+| Serve different content by country | Geolocation |
+| Shift traffic with geographic bias tuning | Geoproximity |
+| Basic multi-endpoint with health checks (no ELB) | Multi-Value |
+
+**Load balancer selection**
+
+| Requirement | Choose |
+|-------------|--------|
+| HTTP/HTTPS routing by path or host | ALB |
+| TCP/UDP, fixed static IP, extreme performance | NLB |
+| Third-party firewall/IDS inspection | GLB |
+
+**DR strategy selection**
+
+| RTO/RPO | Strategy |
+|---------|----------|
+| Hours acceptable, lowest cost | Backup & Restore |
+| 10–30 min RTO, minutes RPO | Pilot Light |
+| Minutes RTO, seconds RPO | Warm Standby |
+| Near-zero RTO/RPO, cost not a constraint | Multi-Site Active-Active |
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Exercise 1 — Create an ALB with Path-Based Routing to Two Target Groups
+
+```bash
+# 1. Create two target groups (assume EC2 instances already exist)
+aws elbv2 create-target-group \
+  --name api-targets \
+  --protocol HTTP --port 8080 \
+  --vpc-id vpc-0abc12345 \
+  --health-check-path /health \
+  --target-type instance
+
+aws elbv2 create-target-group \
+  --name web-targets \
+  --protocol HTTP --port 80 \
+  --vpc-id vpc-0abc12345 \
+  --health-check-path / \
+  --target-type instance
+
+# 2. Create the Application Load Balancer (across 2 AZs)
+ALB_ARN=$(aws elbv2 create-load-balancer \
+  --name my-alb \
+  --subnets subnet-111aaa subnet-222bbb \
+  --security-groups sg-0xyz9876 \
+  --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+
+# 3. Create a listener on port 80 with a default forward to web-targets
+aws elbv2 create-listener \
+  --load-balancer-arn $ALB_ARN \
+  --protocol HTTP --port 80 \
+  --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/web-targets/abc123
+
+# 4. Add a path-based rule: /api/* → api-targets
+LISTENER_ARN=$(aws elbv2 describe-listeners \
+  --load-balancer-arn $ALB_ARN \
+  --query 'Listeners[0].ListenerArn' --output text)
+
+aws elbv2 create-rule \
+  --listener-arn $LISTENER_ARN \
+  --priority 10 \
+  --conditions '[{"Field":"path-pattern","Values":["/api/*"]}]' \
+  --actions '[{"Type":"forward","TargetGroupArn":"arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/api-targets/def456"}]'
+```
+
+### Exercise 2 — Create an Auto Scaling Group with Target Tracking on CPU
+
+```bash
+# 1. Create a Launch Template
+aws ec2 create-launch-template \
+  --launch-template-name my-lt \
+  --launch-template-data '{
+    "ImageId": "ami-0abcdef1234567890",
+    "InstanceType": "t3.micro",
+    "SecurityGroupIds": ["sg-0xyz9876"],
+    "IamInstanceProfile": {"Name": "EC2InstanceProfile"},
+    "UserData": "IyEvYmluL2Jhc2gKeXVtIHVwZGF0ZSAteQ=="
+  }'
+
+# 2. Create the Auto Scaling Group across two AZs
+aws autoscaling create-auto-scaling-group \
+  --auto-scaling-group-name my-asg \
+  --launch-template LaunchTemplateName=my-lt,Version='$Latest' \
+  --min-size 2 --max-size 10 --desired-capacity 2 \
+  --vpc-zone-identifier "subnet-111aaa,subnet-222bbb" \
+  --target-group-arns arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/web-targets/abc123 \
+  --health-check-type ELB \
+  --health-check-grace-period 300
+
+# 3. Attach a Target Tracking Scaling Policy — keep CPU at 50%
+aws autoscaling put-scaling-policy \
+  --auto-scaling-group-name my-asg \
+  --policy-name cpu-target-tracking \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{
+    "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ASGAverageCPUUtilization"
+    },
+    "TargetValue": 50.0,
+    "DisableScaleIn": false
+  }'
+```
+
+### Exercise 3 — Route 53 Failover Routing with Health Check
+
+```bash
+# 1. Create a health check on the primary endpoint
+HEALTH_CHECK_ID=$(aws route53 create-health-check \
+  --caller-reference "primary-hc-$(date +%s)" \
+  --health-check-config '{
+    "IPAddress": "1.2.3.4",
+    "Port": 443,
+    "Type": "HTTPS",
+    "ResourcePath": "/health",
+    "FailureThreshold": 3,
+    "RequestInterval": 30
+  }' \
+  --query 'HealthCheck.Id' --output text)
+
+# 2. Create primary A record with Failover=PRIMARY
+aws route53 change-resource-record-sets \
+  --hosted-zone-id Z1234567890 \
+  --change-batch '{
+    "Changes": [{
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "app.example.com",
+        "Type": "A",
+        "SetIdentifier": "primary",
+        "Failover": "PRIMARY",
+        "TTL": 60,
+        "ResourceRecords": [{"Value": "1.2.3.4"}],
+        "HealthCheckId": "'"$HEALTH_CHECK_ID"'"
+      }
+    }]
+  }'
+
+# 3. Create secondary A record with Failover=SECONDARY (no health check required)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id Z1234567890 \
+  --change-batch '{
+    "Changes": [{
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "app.example.com",
+        "Type": "A",
+        "SetIdentifier": "secondary",
+        "Failover": "SECONDARY",
+        "TTL": 60,
+        "ResourceRecords": [{"Value": "5.6.7.8"}]
+      }
+    }]
+  }'
+```
+
+### Exercise 4 — Enable RDS Multi-AZ on an Existing Instance
+
+```bash
+# Convert single-AZ RDS instance to Multi-AZ (causes brief failover)
+aws rds modify-db-instance \
+  --db-instance-identifier mydb \
+  --multi-az \
+  --apply-immediately
+
+# Monitor the status — wait for "available"
+aws rds describe-db-instances \
+  --db-instance-identifier mydb \
+  --query 'DBInstances[0].{Status:DBInstanceStatus,MultiAZ:MultiAZ}'
+
+# Test failover (simulates AZ failure, takes 1-2 minutes)
+aws rds reboot-db-instance \
+  --db-instance-identifier mydb \
+  --force-failover
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Route 53 Latency vs Geolocation**: Latency routing sends traffic to the Region with the **lowest measured network latency** — NOT the geographically closest Region. A user in Sydney may be routed to Tokyo (lower latency) rather than the Sydney Region. Geolocation routes by the **country/continent of the DNS query**, regardless of latency.
+
+- **RDS Multi-AZ is NOT a read endpoint**: A very common exam trap. The Multi-AZ standby is passive — it synchronously replicates data but cannot serve read traffic. To offload reads, use **Read Replicas**. Multi-AZ's only purpose is automatic failover.
+
+- **ALB path-based and host-based routing**: ALB is the answer when a scenario requires routing `/api/*` to one backend and `/web/*` to another, or routing `api.example.com` to one group and `app.example.com` to another. NLB does not understand HTTP paths.
+
+- **Auto Scaling Target Tracking policy**: For "maintain CPU at X%" or "keep request count per target at Y," the answer is always **Target Tracking**. Step Scaling requires defining CloudWatch alarms and step adjustments — more work, used when precise per-step control is needed.
+
+- **Disaster Recovery RTO/RPO mapping**: If a question gives you an RTO of "minutes" and an RPO of "seconds," the answer is Warm Standby or better. "Hours" RTO at minimal cost is Backup & Restore. The cost/RTO trade-off must match the strategy. Active-Active is reserved for "near-zero" RTO/RPO.
+
+## Common Traps
+
+- **Route 53 Failover without a health check on the primary record**: The Failover routing policy requires a health check associated with the PRIMARY record. Without it, Route 53 will never detect a failure and will never route to the secondary. This is a common wrong-answer scenario where the setup looks right but the health check association is missing.
+
+- **NLB vs ALB for static IP requirements**: Questions mentioning "the client firewall requires whitelisting a fixed IP" point to **NLB** (which supports one static/Elastic IP per AZ) — ALB's IP addresses change over time and cannot be whitelisted by IP. Global Accelerator also provides static IPs and can front an ALB if needed.
+
+- **S3 CRR does not replicate existing objects**: CRR only replicates objects written after the replication rule is created. If the question asks about replicating a pre-existing dataset, the answer involves **S3 Batch Replication**, not CRR alone.
+</ExamAngle>
+
+<Flashcard front="Route 53 Latency routing — how it picks a region" back="Routes to the AWS Region with the lowest measured network latency for the end user — NOT geographically nearest. A client in London may be sent to us-east-1 if latency is lower than eu-west-1." />
+<Flashcard front="RDS Multi-AZ — standby readable?" back="No. The Multi-AZ standby replica is passive and cannot serve read traffic. It exists solely for automatic failover (DNS update in 1–2 min). Use Read Replicas to scale reads." />
+<Flashcard front="ALB path-based routing" back="Application Load Balancer (Layer 7) can route requests to different target groups based on URL path (/api/* → Lambda, /images/* → EC2) or hostname. NLB operates at Layer 4 and cannot inspect HTTP paths." />
+<Flashcard front="Auto Scaling Target Tracking policy" back="Automatically adjusts capacity to keep a chosen metric (e.g., CPU utilisation, request count per target) at a specified target value. Simplest scaling policy — AWS manages the add/remove math." />
+<Flashcard front="Disaster Recovery — Pilot Light" back="Minimal core infrastructure (e.g., a replicated database) kept running in the DR Region. On failover, remaining resources (EC2, ELB) are provisioned and scaled up. RTO ~10–30 minutes, RPO minutes." />
+
+{/* QUIZ
+[
+  {
+    "id": "d2-2-q01",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A global e-commerce website must serve users with the lowest possible latency. The application is deployed in us-east-1 and ap-southeast-1. Which Route 53 routing policy should be used?",
+    "options": [
+      { "id": "A", "text": "Geolocation routing — route US users to us-east-1 and Asian users to ap-southeast-1" },
+      { "id": "B", "text": "Latency routing — route each user to the region with the lowest measured network latency" },
+      { "id": "C", "text": "Weighted routing — split traffic 50/50 between the two regions" },
+      { "id": "D", "text": "Failover routing — use us-east-1 as primary and ap-southeast-1 as secondary" }
+    ],
+    "correct": ["B"],
+    "rationale": "Latency routing sends each user to the Region where they will experience the lowest network latency — which is the optimal choice for minimising latency globally. Geolocation routes by geographic location, not by measured network performance, so a user in Australia might be sent to us-east-1 if that is closer by IP geolocation mapping. Weighted routing ignores latency. Failover routing is for HA, not performance optimisation.",
+    "sourceUrl": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-latency.html",
+    "tags": ["route53", "latency-routing", "high-availability"]
+  },
+  {
+    "id": "d2-2-q02",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's RDS MySQL database runs in a single Availability Zone. They need to minimise downtime in the event of an AZ failure, with automatic recovery and no manual intervention. What should they do?",
+    "options": [
+      { "id": "A", "text": "Create a Read Replica in a different AZ" },
+      { "id": "B", "text": "Enable RDS Multi-AZ deployment" },
+      { "id": "C", "text": "Take daily RDS snapshots and restore to a new AZ on failure" },
+      { "id": "D", "text": "Enable RDS automated backups with a 7-day retention period" }
+    ],
+    "correct": ["B"],
+    "rationale": "RDS Multi-AZ maintains a synchronous standby replica in a different AZ. If the primary instance fails, RDS automatically updates the DNS endpoint to point to the standby within 1–2 minutes — no manual intervention needed. Read Replicas use asynchronous replication and require manual promotion; they are for read scaling, not automatic failover. Snapshots and automated backups do not provide automatic failover.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html",
+    "tags": ["rds", "multi-az", "fault-tolerance", "high-availability"]
+  },
+  {
+    "id": "d2-2-q03",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An application load balancer routes traffic to an Auto Scaling Group. The operations team wants EC2 instances to be replaced automatically if the application process crashes (even though the EC2 instance itself remains running). What configuration achieves this?",
+    "options": [
+      { "id": "A", "text": "Set the ASG health check type to EC2 and reduce the health check grace period to 0" },
+      { "id": "B", "text": "Set the ASG health check type to ELB — the ALB health check will detect application failures" },
+      { "id": "C", "text": "Create a CloudWatch alarm on CPU utilisation and attach a step scaling policy" },
+      { "id": "D", "text": "Enable enhanced monitoring on the EC2 instances" }
+    ],
+    "correct": ["B"],
+    "rationale": "EC2 health checks only detect instance-level failures (hardware/system status). ELB health checks test the application endpoint (e.g., HTTP 200 on /health) — if the app process crashes, the instance fails the ELB health check and the ASG terminates and replaces it. CloudWatch CPU alarms trigger scaling, not replacement of unhealthy instances. Enhanced monitoring improves metric resolution but does not drive ASG replacement.",
+    "sourceUrl": "https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-health-checks.html",
+    "tags": ["auto-scaling", "health-checks", "elb", "fault-tolerance"]
+  },
+  {
+    "id": "d2-2-q04",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A regulated financial institution requires an RTO of 4 hours and an RPO of 1 hour for their disaster recovery plan. They need the lowest possible DR cost. Which strategy meets these requirements?",
+    "options": [
+      { "id": "A", "text": "Multi-Site Active-Active: full infrastructure running in two regions simultaneously" },
+      { "id": "B", "text": "Warm Standby: scaled-down but fully functional environment in the DR region" },
+      { "id": "C", "text": "Pilot Light: core database replicated to DR region; remaining infrastructure started on failover" },
+      { "id": "D", "text": "Backup and Restore: hourly snapshots to S3 Cross-Region Replication; restore on failure" }
+    ],
+    "correct": ["D"],
+    "rationale": "With an RTO of 4 hours and RPO of 1 hour, Backup and Restore is sufficient — it is the lowest-cost DR strategy. Hourly snapshots replicated to another region via S3 CRR can meet an RPO of 1 hour. Restoration within 4 hours is achievable for most workloads. Pilot Light, Warm Standby, and Multi-Site Active-Active all carry higher costs through continuously running infrastructure, which is unnecessary for these relatively relaxed RTO/RPO targets.",
+    "sourceUrl": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html",
+    "tags": ["disaster-recovery", "rto", "rpo", "backup-restore", "cost-optimisation"]
+  },
+  {
+    "id": "d2-2-q05",
+    "objective": "2.2 — Design Highly Available and Fault-Tolerant Architectures",
+    "domain": 2,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company's microservices application uses an Application Load Balancer. They want to route requests for /api/* to a Lambda function and all other requests to an EC2 Auto Scaling Group. Additionally, a third-party security appliance must inspect all inbound traffic before it reaches either backend. What combination of load balancers achieves this?",
+    "options": [
+      { "id": "A", "text": "Single ALB with path-based routing rules for both backends" },
+      { "id": "B", "text": "Gateway Load Balancer to inspect traffic, then forward to ALB with path-based routing rules" },
+      { "id": "C", "text": "Network Load Balancer in front of the ALB, with the security appliance as an NLB target" },
+      { "id": "D", "text": "Two separate ALBs — one for /api/* and one for all other paths — behind a Route 53 weighted policy" }
+    ],
+    "correct": ["B"],
+    "rationale": "Gateway Load Balancer (GLB) is designed to transparently route traffic through third-party virtual network appliances (firewalls, IDS/IPS) before forwarding to application backends. GLB sends all traffic to the security appliance first; after inspection, traffic is forwarded to the ALB, which then applies path-based routing (/api/* → Lambda, /* → EC2 ASG). Option A has no security inspection. Option C (NLB → security appliance) is not the AWS-recommended architecture for transparent appliance insertion. Option D uses Route 53 which does not support path-based routing.",
+    "sourceUrl": "https://docs.aws.amazon.com/elasticloadbalancing/latest/gateway/introduction.html",
+    "tags": ["glb", "alb", "path-routing", "security-appliance", "load-balancing"]
+  }
+]
+*/}

@@ -5,6 +5,487 @@ domain: 4
 weight: "Low"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 4.4 — Cost-Optimized Network Architectures
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Network costs are one of the most underestimated line items on AWS bills. Data transfer in to AWS is free; data transfer out to the internet, cross-AZ transfers, and cross-region transfers all incur charges. For architectures that move large volumes of data — analytics pipelines, media delivery, multi-tier applications spread across AZs — network charges can rival or exceed compute costs.
+
+The key to cost-optimized network architecture is understanding **where data moves** and applying the cheapest path. AWS provides two zero-cost tools that eliminate the most common sources of avoidable network spend: VPC Gateway Endpoints for S3 and DynamoDB traffic, and CloudFront as a cheaper egress path than direct EC2 internet delivery.
+
+Alongside these architectural choices, AWS Cost Explorer, AWS Budgets, and Cost and Usage Reports (CUR) provide the monitoring layer to detect network cost anomalies before they become large bills.
+
+## Key Components
+
+- **Data Transfer Pricing** — Intra-AZ (free), cross-AZ ($0.01/GB each direction), cross-region (varies), internet egress ($0.09/GB first 10 TB)
+- **VPC Gateway Endpoints** — Free private connectivity to S3 and DynamoDB; eliminates NAT Gateway processing fees
+- **VPC Interface Endpoints** — Private connectivity to 100+ AWS services via PrivateLink; $0.01/hr + $0.01/GB
+- **NAT Gateway** — Managed service for outbound internet from private subnets; $0.045/hr + $0.045/GB processed
+- **NAT Instance** — Self-managed EC2-based NAT; no data processing fee, only EC2 instance cost
+- **CloudFront** — CDN that delivers content from edge locations; cheaper per-GB than EC2 internet egress
+- **AWS Cost Explorer** — Visualize and analyze costs with filtering and forecasting
+- **AWS Budgets** — Set cost/usage thresholds with alerts via email or SNS
+- **Cost and Usage Reports (CUR)** — Most detailed billing data; integrates with Athena/QuickSight
+- **AWS Trusted Advisor** — Automated checks including idle resources and cost optimization recommendations
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Data Transfer Pricing — The Full Picture
+
+Understanding AWS data transfer pricing is essential for designing cost-optimized architectures:
+
+| Transfer Type | Cost |
+|---|---|
+| Data IN to AWS (any source) | Free |
+| Intra-AZ (within same AZ, same region) | Free |
+| Inter-AZ (different AZs, same region) | $0.01/GB each direction ($0.02/GB round trip) |
+| Cross-region (between AWS regions) | $0.02–$0.09/GB depending on regions |
+| EC2 → Internet (first 10 TB/month) | $0.09/GB |
+| EC2 → Internet (next 40 TB/month) | $0.085/GB |
+| CloudFront → Internet (first 10 TB/month) | $0.0085/GB (US/EU) |
+| AWS → CloudFront (origin fetch) | Free (no charge for transfers from AWS origin to CloudFront) |
+
+**The cross-AZ trap**: A common architectural pattern places EC2 instances in multiple AZs behind a load balancer. If the application tier in AZ-a frequently calls the database in AZ-b, every query incurs $0.01/GB each way. For a high-throughput application, this can add thousands of dollars per month. Solutions: ensure each tier's primary resource is in the same AZ, or use AWS Global Accelerator / ALB with AZ-affinity routing.
+
+### VPC Gateway Endpoints — The Free Win
+
+VPC Gateway Endpoints provide private connectivity from your VPC to S3 and DynamoDB without routing traffic through a NAT Gateway or internet gateway. They are **free of charge** — no hourly fee, no data processing fee.
+
+**Why this matters for NAT Gateway cost**:
+
+A common architecture has Lambda functions or EC2 instances in private subnets that need to access S3 (e.g., reading/writing files). Without a Gateway Endpoint, this traffic routes through NAT Gateway:
+- NAT Gateway data processing: $0.045/GB
+- A Lambda function writing 1 TB/month to S3 through NAT Gateway: 1,000 GB × $0.045 = **$45/month just in NAT processing**
+- With S3 Gateway Endpoint: the same traffic costs **$0/month** in NAT processing
+
+The implementation is a simple route table entry — no code changes required. The endpoint adds a route to the VPC route table that directs S3-destined traffic to the endpoint instead of the NAT Gateway.
+
+**Coverage**: Gateway Endpoints exist only for S3 and DynamoDB. All other AWS services require Interface Endpoints (PrivateLink), which are charged per hour and per GB.
+
+### NAT Gateway vs NAT Instance Cost Analysis
+
+**NAT Gateway** (managed service):
+- Hourly charge: $0.045/hr/AZ ≈ $32.40/month per NAT Gateway
+- Data processing: $0.045/GB processed
+- Highly available within an AZ; deploy one per AZ for full HA
+- No management overhead
+
+**NAT Instance** (self-managed EC2):
+- EC2 instance cost only: a t3.small ($0.0208/hr ≈ $15/month) can handle modest throughput
+- No data processing fee
+- Requires manual HA setup (failover scripts, Elastic IP management)
+- Instance type limits throughput (t3.nano/micro may bottleneck high-volume traffic)
+- Not recommended for production unless cost pressure is extreme
+
+**Break-even analysis**:
+For a NAT Gateway at $32.40/month fixed + $0.045/GB:
+- vs NAT Instance at $15/month for a t3.small (no processing fee)
+- Break-even at data volume: ($32.40 - $15) / $0.045 ≈ 387 GB/month
+- If your outbound traffic through NAT is >387 GB/month, NAT Gateway gets more expensive than a NAT Instance
+
+However, for most production workloads, the management overhead and HA complexity of NAT Instances make NAT Gateway the right choice. The **correct cost optimization** is eliminating unnecessary NAT Gateway traffic (e.g., S3/DynamoDB via Gateway Endpoints) rather than replacing NAT Gateway with an instance.
+
+**Multi-AZ NAT Gateway cost**: For high-availability, deploying a NAT Gateway per AZ (e.g., 3 AZs) costs $97.20/month in hourly charges alone. If cross-AZ data transfer charges to reach a single NAT Gateway are acceptable for the workload, using one NAT Gateway can reduce the fixed cost to $32.40/month.
+
+### CloudFront as a Cost-Optimization Tool
+
+CloudFront is primarily a CDN for performance, but it is also cheaper for content delivery than direct EC2 egress:
+- EC2 internet egress: $0.09/GB
+- CloudFront internet egress: $0.0085/GB (10x cheaper in US/Europe)
+- Transfer from EC2/S3 to CloudFront: **free**
+
+For a public-facing web application delivering 100 TB/month:
+- Direct EC2: 100,000 GB × $0.085 (40TB tier) ≈ **$8,500/month**
+- Via CloudFront: ~$850/month (at blended rates) + near-zero origin fetch costs
+
+Additionally, CloudFront caching reduces origin hits — if 80% of requests are cache hits, only 20% of the data actually flows from the origin, further reducing origin compute load.
+
+**When to put CloudFront in front of S3**:
+- Public static content (images, JS, CSS, HTML)
+- Video-on-demand and livestreaming content
+- API caching for GET-heavy APIs (reduces Lambda/EC2 invocations)
+- Always prefer CloudFront → S3 over direct S3 URL for high-traffic content
+
+### AWS Cost Explorer
+
+Cost Explorer provides 13 months of cost and usage history with interactive charts. Key cost optimization features:
+
+- **Service-level breakdowns**: See exactly how much EC2, RDS, NAT Gateway, and data transfer cost each month
+- **Reserved Instance recommendations**: ML-based analysis of your On-Demand usage to suggest RI purchases
+- **Savings Plans recommendations**: Similar analysis for Savings Plans commitments
+- **Cost anomaly detection**: Automatically detects unusual spend spikes and sends SNS alerts
+- **Forecasting**: Projects future spend based on current usage trends
+
+Cost Explorer is free to enable and use (except for API calls, which are $0.01 per paginated result).
+
+### AWS Budgets
+
+AWS Budgets lets you define thresholds and receive alerts before costs exceed expectations:
+
+- **Cost budgets**: Alert when actual or forecasted monthly spend exceeds a threshold (e.g., alert at 80% and 100% of $1,000/month budget)
+- **Usage budgets**: Alert when specific service usage (e.g., EC2 running hours, NAT Gateway GB processed) exceeds a threshold
+- **Savings Plans/RI coverage budgets**: Alert when RI or Savings Plans coverage drops below a target (e.g., alert if <70% of EC2 usage is covered by commitments)
+- **Notifications**: Email, SNS, or budget actions (automatically apply an IAM policy to restrict spend)
+
+The first two budgets per account are free; $0.02/day for each additional budget.
+
+### Cost and Usage Reports (CUR)
+
+CUR is the most granular AWS billing data source — line-item level data delivered to S3 in CSV format, updated up to 3 times per day. It provides data that Cost Explorer does not surface:
+
+- Exact resource IDs (which specific EC2 instance, which NAT Gateway)
+- BlendedCost vs UnblendedCost vs public on-demand rate
+- Savings Plans and RI amortized costs
+- Resource tags for cost allocation
+
+CUR is the foundation for cost analytics with Athena + QuickSight or third-party tools like CloudHealth and Apptio Cloudability. CUR itself is free; Athena query costs and S3 storage apply.
+
+### AWS Trusted Advisor Cost Checks
+
+Trusted Advisor provides automated best-practice checks across 5 categories. Cost optimization checks include:
+- **Idle EC2 instances** (CPU <10% for 4+ days)
+- **Underutilized EBS volumes** (write operations <1/day for 7 days)
+- **Unassociated Elastic IP addresses** ($0.005/hr each when not attached)
+- **Idle RDS instances** (connections = 0 for 7+ days)
+- **Low utilization EC2 instances** (right-sizing candidates)
+- **Savings Plans / RI coverage** (low-coverage resources flagged)
+- **NAT Gateway idle** (no traffic for 30 days)
+
+**Access levels**:
+- Basic/Developer support: 6 core checks (security + service limits only)
+- Business/Enterprise support: All 135+ checks including cost optimization
+- Cost optimization checks are only available with Business or Enterprise support plans
+
+## Decision Flow
+
+### Reducing NAT Gateway costs
+
+```
+Is traffic destined for S3 or DynamoDB?
+  YES → Add VPC Gateway Endpoint (FREE, no NAT needed)
+  NO → Continue
+
+Is traffic destined for other AWS services?
+  YES → Evaluate VPC Interface Endpoint (PrivateLink) — pay per GB vs NAT per GB, compare
+  NO → Traffic goes to internet, NAT Gateway is required
+
+Is data volume through NAT Gateway high?
+  Check: traffic > 387 GB/month?
+  Consider NAT Instance for dev/test environments
+  Production: keep NAT Gateway, optimize what goes through it
+```
+
+### Reducing cross-AZ costs
+
+```
+Application makes frequent calls between AZs?
+  → Place tightly-coupled services in same AZ
+  → Trade-off: reduced availability (acceptable for stateless tiers)
+
+Database in different AZ from application?
+  → Use RDS read replica in same AZ for read-heavy patterns
+  → Or use ElastiCache in each AZ to avoid cross-AZ DB reads
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create an S3 VPC Gateway Endpoint
+
+```bash
+# Get your VPC ID and route table IDs
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters Name=isDefault,Values=false \
+  --query 'Vpcs[0].VpcId' --output text)
+
+ROUTE_TABLE_IDS=$(aws ec2 describe-route-tables \
+  --filters Name=vpc-id,Values=$VPC_ID \
+  --query 'RouteTables[*].RouteTableId' \
+  --output text | tr '\t' ' ')
+
+echo "VPC: $VPC_ID"
+echo "Route Tables: $ROUTE_TABLE_IDS"
+
+# Create the S3 Gateway Endpoint (FREE — no charges)
+aws ec2 create-vpc-endpoint \
+  --vpc-id $VPC_ID \
+  --service-name com.amazonaws.us-east-1.s3 \
+  --route-table-ids $ROUTE_TABLE_IDS \
+  --vpc-endpoint-type Gateway
+
+# Create DynamoDB Gateway Endpoint as well (also free)
+aws ec2 create-vpc-endpoint \
+  --vpc-id $VPC_ID \
+  --service-name com.amazonaws.us-east-1.dynamodb \
+  --route-table-ids $ROUTE_TABLE_IDS \
+  --vpc-endpoint-type Gateway
+
+# Verify the endpoints and their route table associations
+aws ec2 describe-vpc-endpoints \
+  --filters Name=vpc-id,Values=$VPC_ID \
+  --query 'VpcEndpoints[*].{Service:ServiceName,State:State,RouteTables:RouteTableIds}' \
+  --output table
+```
+
+### Find and Report NAT Gateway Data Processing Costs
+
+```bash
+# Get NAT Gateway data processing costs from Cost Explorer (last 30 days)
+aws ce get-cost-and-usage \
+  --time-period Start=$(date -v-30d +%Y-%m-%d),End=$(date +%Y-%m-%d) \
+  --granularity MONTHLY \
+  --filter '{
+    "And": [
+      {"Dimensions": {"Key":"SERVICE","Values":["Amazon Virtual Private Cloud"]}},
+      {"Dimensions": {"Key":"USAGE_TYPE_GROUP","Values":["NAT Gateway - Bytes"]}}
+    ]
+  }' \
+  --metrics "UnblendedCost" "UsageQuantity" \
+  --group-by Type=DIMENSION,Key=USAGE_TYPE \
+  --query 'ResultsByTime[*].Groups[*].{Type:Keys[0],Cost:Metrics.UnblendedCost.Amount,Quantity:Metrics.UsageQuantity.Amount}' \
+  --output table
+```
+
+### Set Up a Cost Budget with Alerts
+
+```bash
+# Create a monthly cost budget with 80% and 100% alerts
+aws budgets create-budget \
+  --account-id $(aws sts get-caller-identity --query Account --output text) \
+  --budget '{
+    "BudgetName": "MonthlySpendBudget",
+    "BudgetLimit": {"Amount": "1000", "Unit": "USD"},
+    "BudgetType": "COST",
+    "TimeUnit": "MONTHLY",
+    "TimePeriod": {
+      "Start": "2024-01-01T00:00:00Z",
+      "End": "2030-12-31T00:00:00Z"
+    }
+  }' \
+  --notifications-with-subscribers '[
+    {
+      "Notification": {
+        "NotificationType": "ACTUAL",
+        "ComparisonOperator": "GREATER_THAN",
+        "Threshold": 80,
+        "ThresholdType": "PERCENTAGE"
+      },
+      "Subscribers": [{
+        "SubscriptionType": "EMAIL",
+        "Address": "admin@example.com"
+      }]
+    },
+    {
+      "Notification": {
+        "NotificationType": "FORECASTED",
+        "ComparisonOperator": "GREATER_THAN",
+        "Threshold": 100,
+        "ThresholdType": "PERCENTAGE"
+      },
+      "Subscribers": [{
+        "SubscriptionType": "EMAIL",
+        "Address": "admin@example.com"
+      }]
+    }
+  ]'
+```
+
+### Enable Cost Anomaly Detection
+
+```bash
+# Create a cost anomaly monitor for all AWS services
+aws ce create-anomaly-monitor \
+  --anomaly-monitor '{
+    "MonitorName": "AllServicesMonitor",
+    "MonitorType": "DIMENSIONAL",
+    "MonitorDimension": "SERVICE"
+  }'
+
+# Get the monitor ARN from the above response, then create a subscription
+MONITOR_ARN=$(aws ce get-anomaly-monitors \
+  --query 'AnomalyMonitors[?MonitorName==`AllServicesMonitor`].MonitorArn' \
+  --output text)
+
+aws ce create-anomaly-subscription \
+  --anomaly-subscription '{
+    "SubscriptionName": "DailyAnomalyAlert",
+    "MonitorArnList": ["'"$MONITOR_ARN"'"],
+    "Subscribers": [{
+      "Address": "admin@example.com",
+      "Type": "EMAIL"
+    }],
+    "Threshold": 20,
+    "Frequency": "DAILY"
+  }'
+```
+
+### Query Cost and Usage Report with Athena (after CUR setup)
+
+```sql
+-- Find top 10 most expensive resources last month (run in Athena after CUR table is created)
+SELECT
+  line_item_resource_id,
+  product_product_name,
+  line_item_usage_type,
+  SUM(line_item_unblended_cost) AS total_cost
+FROM cost_and_usage_report
+WHERE
+  year = '2024' AND month = '12'
+  AND line_item_line_item_type = 'Usage'
+GROUP BY
+  line_item_resource_id,
+  product_product_name,
+  line_item_usage_type
+ORDER BY total_cost DESC
+LIMIT 10;
+
+-- Find cross-AZ data transfer costs by resource
+SELECT
+  line_item_resource_id,
+  line_item_usage_type,
+  SUM(line_item_unblended_cost) AS transfer_cost,
+  SUM(line_item_usage_amount) AS gb_transferred
+FROM cost_and_usage_report
+WHERE
+  year = '2024' AND month = '12'
+  AND line_item_usage_type LIKE '%DataTransfer-Regional%'
+GROUP BY line_item_resource_id, line_item_usage_type
+ORDER BY transfer_cost DESC;
+```
+
+### Find Unassociated Elastic IPs (Wasted Spend)
+
+```bash
+# List all Elastic IPs that are NOT associated with an instance
+# Each unassociated EIP costs $0.005/hour = $3.60/month
+aws ec2 describe-addresses \
+  --query 'Addresses[?!AssociationId].{AllocationId:AllocationId,PublicIp:PublicIp,InstanceId:InstanceId}' \
+  --output table
+
+# Release an unneeded Elastic IP (after confirming it is not needed)
+# aws ec2 release-address --allocation-id eipalloc-0a1b2c3d4e5f67890
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **VPC Gateway Endpoint eliminates NAT Gateway fees for S3/DynamoDB**: This is the most commonly tested network cost scenario. When a question describes EC2 or Lambda in private subnets accessing S3, and the goal is to reduce costs, adding an S3 VPC Gateway Endpoint is the answer. Gateway Endpoints are free and require no code changes — just a route table update.
+- **Cross-AZ transfer cost awareness**: The exam tests whether you recognize that putting all instances of a tier in a single AZ eliminates cross-AZ charges but reduces availability. Alternatively, co-locating related services (e.g., EC2 and its ElastiCache in the same AZ) reduces the number of cross-AZ calls.
+- **CloudFront is cheaper than EC2 internet egress**: When a question asks how to reduce costs for delivering high volumes of content to internet users, CloudFront is the answer — it's ~10x cheaper per GB and free from AWS origin to edge.
+- **Trusted Advisor Business/Enterprise for full cost checks**: Basic Trusted Advisor only provides 6 checks (core security + service limits). Full cost optimization checks including idle EC2, underutilized EBS, and unused Elastic IPs require Business or Enterprise support.
+- **AWS Budgets vs Cost Explorer**: Budgets = proactive alerting and enforcement (alert before you overspend). Cost Explorer = reactive analysis and RI/SP purchase recommendations. Use both together.
+
+## Common Traps
+
+- **Gateway Endpoint vs Interface Endpoint**: Gateway Endpoints (S3 and DynamoDB) are free. Interface Endpoints (all other AWS services — SQS, SNS, KMS, etc.) are charged at $0.01/hr + $0.01/GB. Do not assume all VPC endpoints are free — only the two Gateway Endpoints are.
+- **NAT Gateway per-AZ cost accumulation**: Deploying a NAT Gateway in each AZ for HA is correct practice, but three NAT Gateways at $0.045/hr each = $97.20/month in fixed costs alone, before any data processing charges. The exam may present this as a cost trade-off question where a single NAT Gateway is chosen to reduce fixed costs at the expense of AZ-level HA for outbound traffic.
+- **Trusted Advisor does not require enabling**: Trusted Advisor is always active. However, access to cost optimization checks beyond the basic 6 is gated on support plan tier — not on any configuration setting. A question about "how to get Trusted Advisor cost recommendations" is really asking about the support tier, not configuration.
+</ExamAngle>
+
+<Flashcard front="Why does adding a VPC Gateway Endpoint for S3 reduce costs?" back="Traffic from EC2/Lambda in private subnets to S3 would otherwise route through NAT Gateway, incurring $0.045/GB in data processing fees. A Gateway Endpoint routes this traffic directly (free) without using NAT Gateway, eliminating that processing charge entirely." />
+<Flashcard front="What is the data transfer cost for traffic between EC2 instances in different Availability Zones?" back="$0.01/GB in each direction ($0.02/GB for a round-trip query). This applies to any cross-AZ traffic including EC2-to-EC2, EC2-to-RDS, EC2-to-ElastiCache, etc. Traffic within the same AZ is free." />
+<Flashcard front="Why is CloudFront cheaper than serving content directly from EC2 for internet delivery?" back="EC2 internet egress costs $0.09/GB (first 10 TB). CloudFront egress costs ~$0.0085/GB to internet (US/Europe) — roughly 10x cheaper. Additionally, transfers from AWS origins (EC2, S3) to CloudFront edge locations are free, so total cost is just the edge-to-internet rate." />
+<Flashcard front="What Trusted Advisor checks require Business or Enterprise support?" back="Full cost optimization checks including: idle EC2 instances, underutilized EBS volumes, unassociated Elastic IPs, idle RDS instances, NAT Gateway idle alerts, and RI/Savings Plans coverage. Basic support only gets 6 checks (security and service limits)." />
+<Flashcard front="What is the difference between AWS Budgets and AWS Cost Explorer?" back="AWS Budgets is proactive — you set thresholds and receive alerts (email/SNS) or trigger automated actions when costs exceed limits. Cost Explorer is reactive — it analyzes historical spend, visualizes trends, and provides RI/Savings Plans purchase recommendations. Budgets prevents bill shock; Cost Explorer diagnoses and optimizes." />
+
+{/* QUIZ
+[
+  {
+    "id": "d4-4-q01",
+    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's AWS bill shows unexpectedly high charges from Amazon VPC for 'NAT Gateway - Bytes Processed.' Investigation reveals that Lambda functions in private subnets are writing large volumes of data to S3 every hour. What is the most cost-effective solution to eliminate the NAT Gateway processing charges for this traffic?",
+    "options": [
+      { "id": "A", "text": "Move the Lambda functions to public subnets so they can access S3 directly" },
+      { "id": "B", "text": "Create an S3 VPC Gateway Endpoint and add the route to the private subnet route tables" },
+      { "id": "C", "text": "Create an S3 VPC Interface Endpoint to route traffic privately" },
+      { "id": "D", "text": "Replace the NAT Gateway with a NAT Instance to eliminate data processing fees" }
+    ],
+    "correct": ["B"],
+    "rationale": "An S3 VPC Gateway Endpoint routes traffic from the VPC directly to S3 without passing through the NAT Gateway. It is completely free — no hourly charge and no data processing fee. This eliminates the NAT Gateway processing charges entirely for S3 traffic. Moving to public subnets (A) creates security exposure. Interface Endpoints (C) for S3 exist but are charged per GB — Gateway Endpoints are the free option and should be used for S3. NAT Instance (D) eliminates processing fees but introduces management overhead and still requires routing all other internet-bound traffic through the instance.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-s3.html",
+    "tags": ["vpc-endpoint", "gateway-endpoint", "nat-gateway", "s3", "cost"]
+  },
+  {
+    "id": "d4-4-q02",
+    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A media company serves video content to millions of global users directly from EC2 instances behind an Application Load Balancer. Their monthly AWS bill shows $40,000 in EC2 data transfer charges. A solutions architect reviews the architecture. Which change most significantly reduces data transfer costs while improving global performance?",
+    "options": [
+      { "id": "A", "text": "Use S3 Transfer Acceleration to speed up content delivery" },
+      { "id": "B", "text": "Store video files in S3 and serve them directly from S3 public URLs" },
+      { "id": "C", "text": "Deploy CloudFront in front of the EC2 origin servers" },
+      { "id": "D", "text": "Enable EC2 Enhanced Networking for higher throughput" }
+    ],
+    "correct": ["C"],
+    "rationale": "CloudFront data transfer to the internet costs ~$0.0085/GB vs $0.085/GB from EC2 — approximately 10x cheaper. Origin fetch from EC2 to CloudFront is free. For a $40,000 EC2 egress bill, CloudFront would reduce this to approximately $4,000/month. CloudFront also caches content at edge locations globally, reducing origin load and improving latency for global users. S3 Transfer Acceleration (A) speeds up uploads to S3, not delivery to users. S3 public URLs (B) still charge S3 egress rates ($0.09/GB), comparable to EC2. Enhanced Networking (D) improves instance-level throughput but doesn't change data transfer pricing.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/IntroductionUseCases.html",
+    "tags": ["cloudfront", "data-transfer", "cost", "cdn"]
+  },
+  {
+    "id": "d4-4-q03",
+    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A three-tier web application has its web tier, application tier, and RDS database each deployed across 3 Availability Zones. The architecture review reveals frequent cross-AZ calls between the application tier in AZ-b and the RDS primary in AZ-a, and between the application tier in AZ-c and the RDS primary in AZ-a. Monthly cross-AZ data transfer charges are $800. Which change eliminates most of these charges while maintaining high availability?",
+    "options": [
+      { "id": "A", "text": "Consolidate all three tiers into a single Availability Zone to eliminate cross-AZ charges" },
+      { "id": "B", "text": "Add RDS read replicas in AZ-b and AZ-c for read queries, keeping the Multi-AZ primary for writes" },
+      { "id": "C", "text": "Enable RDS Multi-AZ to ensure the standby is in a different AZ from the primary" },
+      { "id": "D", "text": "Move RDS to a different region closer to the application tier" }
+    ],
+    "correct": ["B"],
+    "rationale": "Adding RDS read replicas in each AZ allows the application tier in AZ-b to read from the AZ-b replica (intra-AZ, free) and AZ-c to read from the AZ-c replica (intra-AZ, free). Write traffic still goes to the primary (cross-AZ charge), but if the workload is read-heavy (typical for web apps), this eliminates the majority of cross-AZ transfer costs. Multi-AZ HA is maintained through the combination of primary + replicas across AZs. Consolidating to one AZ (A) eliminates HA. Enabling Multi-AZ (C) adds a standby but doesn't provide local read replicas. Moving to another region (D) adds cross-region latency and potentially higher charges.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+    "tags": ["cross-az", "data-transfer", "rds", "read-replica", "cost"]
+  },
+  {
+    "id": "d4-4-q04",
+    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "domain": 4,
+    "difficulty": "easy",
+    "type": "single",
+    "stem": "A DevOps team wants to receive an email alert when their AWS account's monthly spend is projected to exceed $5,000, based on current spending trends. They also want to receive an alert if actual spending exceeds $4,500. Which AWS service should they configure?",
+    "options": [
+      { "id": "A", "text": "AWS Cost Explorer with anomaly detection" },
+      { "id": "B", "text": "AWS Budgets with cost budget alerts" },
+      { "id": "C", "text": "AWS Cost and Usage Reports with Athena queries" },
+      { "id": "D", "text": "AWS Trusted Advisor cost optimization checks" }
+    ],
+    "correct": ["B"],
+    "rationale": "AWS Budgets allows creating cost budgets with both ACTUAL and FORECASTED thresholds. You can configure an actual threshold at $4,500 and a forecasted threshold at $5,000, both sending email alerts. This is exactly the proactive alerting use case Budgets is designed for. Cost Explorer with anomaly detection (A) alerts on unexpected spikes relative to baseline, not absolute thresholds. Cost and Usage Reports (C) provide raw data for analysis, not real-time alerts. Trusted Advisor (D) checks for idle/underutilized resources but does not provide budget threshold alerting.",
+    "sourceUrl": "https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html",
+    "tags": ["aws-budgets", "cost-alerts", "cost-management"]
+  },
+  {
+    "id": "d4-4-q05",
+    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company wants to use AWS Trusted Advisor to identify idle EC2 instances and unassociated Elastic IPs to reduce costs. They currently have a Basic Support plan. What must they do to access these cost optimization checks?",
+    "options": [
+      { "id": "A", "text": "Enable Trusted Advisor in the AWS Console — it is disabled by default" },
+      { "id": "B", "text": "Upgrade to at least Business Support plan" },
+      { "id": "C", "text": "Enable AWS Config to allow Trusted Advisor to scan resources" },
+      { "id": "D", "text": "Create an IAM role with Trusted Advisor full access permissions" }
+    ],
+    "correct": ["B"],
+    "rationale": "Full cost optimization checks in Trusted Advisor (including idle EC2 instances, underutilized EBS, unassociated Elastic IPs, idle RDS instances) require Business or Enterprise Support plans. Basic and Developer support plans only provide access to 6 core checks (4 security + 2 service limits). Trusted Advisor is always active and does not require enabling (A). AWS Config is a separate service unrelated to Trusted Advisor's scan mechanism (C). IAM permissions control who can view Trusted Advisor results, but the check availability itself is determined by the support tier, not IAM (D).",
+    "sourceUrl": "https://docs.aws.amazon.com/awssupport/latest/user/trusted-advisor.html",
+    "tags": ["trusted-advisor", "support-plan", "cost-optimization"]
+  }
+]
+*/}

@@ -5,6 +5,414 @@ domain: 4
 weight: "Low"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 4.3 — Cost-Optimized Database Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Database costs on AWS have two primary drivers: **compute** (instance hours or capacity units consumed) and **storage** (GB provisioned plus I/O in some cases). Optimizing database costs means aligning the compute model to the actual traffic pattern — paying for steady-state capacity via reserved pricing when traffic is predictable, and switching to consumption-based pricing when traffic is variable or has extended idle periods.
+
+AWS managed database services offer multiple pricing dimensions that can compound: RDS charges for instance, storage, I/O (on io1 volumes), backup storage, and data transfer. DynamoDB charges for read/write capacity units or request-based pricing. Understanding the break-even points between pricing models is a key SAA-C03 skill.
+
+A complementary cost-reduction strategy is **caching**: adding ElastiCache in front of RDS absorbs read traffic and allows the underlying RDS instance to be right-sized smaller. Combined with RDS Reserved Instances and Aurora Serverless for variable workloads, these techniques can cut database spend by 50–70%.
+
+## Key Components
+
+- **RDS Reserved Instances** — 1 or 3-year commitment per instance class/engine; up to 69% savings
+- **Aurora Serverless v2** — ACU-based auto-scaling; scales to near-zero during idle; no idle charges
+- **DynamoDB On-Demand** — Pay per request; no capacity planning; automatic scaling
+- **DynamoDB Provisioned + Auto Scaling** — Reserved read/write capacity with automatic adjustment; cheaper at predictable load
+- **DynamoDB Reserved Capacity** — 1 or 3-year commitment on provisioned capacity; up to 76% savings
+- **ElastiCache** — In-memory cache that reduces RDS read load; Reserved Nodes for predictable usage
+- **Redshift Reserved Nodes** — Committed pricing for data warehouse capacity
+- **Performance Insights** — RDS/Aurora query performance monitoring; identifies over-provisioned instances
+- **RDS Proxy** — Managed connection pooler; reduces connection overhead for Lambda→RDS patterns
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### RDS Reserved Instances
+
+RDS Reserved Instances work similarly to EC2 RIs: you commit to a specific DB instance class, engine, and deployment type (Single-AZ or Multi-AZ) for 1 or 3 years in exchange for a discounted hourly rate.
+
+| Commitment | Payment Option | Estimated Savings |
+|---|---|---|
+| 1-year | No Upfront | ~35% |
+| 1-year | Partial Upfront | ~42% |
+| 1-year | All Upfront | ~43% |
+| 3-year | No Upfront | ~55% |
+| 3-year | Partial Upfront | ~62% |
+| 3-year | All Upfront | ~69% |
+
+Key points:
+- RDS RIs are **per-engine**: a MySQL RI does not apply to PostgreSQL. Changing engine requires new RI purchase.
+- RDS RIs apply within a region but you can modify the AZ and instance class within the same family in some engines.
+- Multi-AZ RIs are ~2x the cost of Single-AZ RIs but cover both primary and standby.
+- Use AWS Cost Explorer's Reserved Instance recommendations to identify under-committed RDS instances.
+
+### Aurora Serverless v2
+
+Aurora Serverless v2 eliminates the need to pre-provision a fixed DB instance size. It auto-scales Aurora compute in fine-grained increments of 0.5 Aurora Capacity Units (ACUs), with a range of 0.5 ACU (minimum) to 128 ACU (maximum). 1 ACU ≈ 2 GB RAM + proportional CPU.
+
+**Pricing**: You are billed per ACU-hour. When the database is idle, it can scale down to the minimum ACU setting (0.5 ACU). During peak load, it scales up within seconds to handle the burst.
+
+**Cost advantage scenarios**:
+- **Dev/test environments**: Scale to 0.5 ACU when idle overnight and on weekends — eliminates the largest cost driver (idle instance time) for non-production databases
+- **Variable production workloads**: Applications with sharp daily/weekly traffic cycles (e.g., business apps used 9am–5pm weekdays) benefit from automatic scale-down outside business hours
+- **New applications**: Unknown traffic patterns are risky with fixed provisioning — Serverless v2 avoids both over-provisioning and capacity shortage
+
+**When Aurora Serverless v2 is NOT ideal**:
+- Workloads with constant high load 24/7 — a fixed provisioned cluster with RIs will be cheaper
+- Applications requiring consistent sub-millisecond latency — ACU scaling takes ~1–2 seconds, causing brief latency spikes during rapid scale-up
+
+**Note**: Aurora Serverless v2 can be combined with Aurora Provisioned read replicas for read scaling while keeping the writer serverless.
+
+### DynamoDB: On-Demand vs Provisioned
+
+**DynamoDB On-Demand** charges per read/write request:
+- Write Request Unit (WRU): $1.25 per million write request units
+- Read Request Unit (RRU): $0.25 per million read request units
+- No capacity planning, no throttling, automatic scaling to any traffic level
+
+**DynamoDB Provisioned Capacity** charges for reserved Read/Write Capacity Units (RCU/WCU) per hour:
+- Write Capacity Unit: $0.00065 per WCU/hour ($0.47/WCU/month)
+- Read Capacity Unit: $0.00013 per RCU/hour ($0.09/RCU/month)
+- You pay for provisioned capacity even if unused
+
+**Break-even analysis (writes)**:
+- Provisioned 1 WCU costs $0.47/month
+- On-Demand equivalent: 1 WCU handles 1 write/second = 2,592,000 writes/month = $3.24
+- On-Demand is 7x more expensive per WCU at constant 100% utilization
+- On-Demand is cost-effective when average utilization is <15% of peak (traffic is very spiky)
+
+**Decision rule**:
+- Unpredictable/spiky traffic → On-Demand (no under-provisioning risk, no capacity planning)
+- Predictable traffic with some variance → Provisioned + Auto Scaling (cheaper per unit)
+- High, stable traffic → Provisioned + Reserved Capacity (maximum discount)
+
+**DynamoDB Auto Scaling**: Uses Application Auto Scaling to adjust provisioned capacity based on a target utilization (default 70%). This handles gradual traffic changes but has lag — sudden spikes can still cause throttling before scaling catches up. For truly spiky traffic, On-Demand is safer.
+
+**DynamoDB Reserved Capacity**: Commit to a minimum of 100 WCU and 100 RCU for 1 or 3 years. Savings of up to 76% vs provisioned On-Demand pricing (not the same as standard On-Demand). Best for tables with stable high-throughput workloads.
+
+### ElastiCache as a Cost Lever
+
+Adding ElastiCache between the application and RDS creates a multiplier effect on cost savings:
+
+1. **Direct cost of ElastiCache**: ElastiCache Redis or Memcached nodes (Reserved Nodes for predictable workloads)
+2. **RDS instance right-sizing**: If 60% of database reads are served from cache, the RDS instance handles 40% of its former load. This may allow downsizing from db.r6g.2xlarge to db.r6g.large — a 50% reduction in RDS cost
+3. **Net result**: The ElastiCache cost is often less than the RDS savings, netting a lower total bill AND better read performance
+
+Cache-aside (lazy loading) is the most common pattern:
+1. Application checks cache first
+2. Cache miss → query RDS → write result to cache → return
+3. Cache hit → return cached result directly (no RDS query)
+
+**ElastiCache Reserved Nodes**: Same principle as EC2/RDS RIs — commit to 1 or 3 years for 30–55% savings. Best for production caches that run continuously.
+
+### RDS Proxy and the Lambda Connection Problem
+
+AWS Lambda functions are ephemeral: each invocation can be a new execution environment with a new database connection. Under high concurrency, hundreds of simultaneous Lambda invocations each opening their own database connection can exhaust the RDS connection limit (which is limited by instance memory — typically 100–1,000 connections depending on instance size).
+
+The traditional workaround was to provision a larger RDS instance with more connection headroom — an expensive solution. RDS Proxy solves this by maintaining a **persistent connection pool** to RDS and multiplexing many Lambda connections over a small number of actual database connections.
+
+**Cost impact**:
+- RDS Proxy costs $0.015 per vCPU/hour of the database instance
+- Enables right-sizing RDS to a smaller instance class that would otherwise exhaust connections under Lambda load
+- For a db.r6g.large ($0.26/hr), RDS Proxy costs $0.03/hr — adding 11% to the DB cost but potentially allowing a 50% smaller instance
+
+### Performance Insights for Right-Sizing
+
+RDS Performance Insights provides a database load dashboard showing:
+- DB Load (average active sessions) vs instance vCPUs
+- Top SQL queries by load
+- Top wait events (CPU, I/O, locking)
+
+If DB Load consistently stays below 1 vCPU equivalent on a 4-vCPU instance, the instance is over-provisioned. Performance Insights enables data-driven right-sizing decisions rather than guesswork.
+
+Performance Insights is free for the last 7 days of data for most RDS instance classes. Extended retention (up to 2 years) is $0.02/vCPU/month.
+
+## Decision Flow
+
+### DynamoDB pricing model selection
+
+```
+Is traffic pattern unpredictable or highly spiky (peak >>10x average)?
+  YES → On-Demand
+  NO → Continue
+
+Is this new/unknown workload?
+  YES → On-Demand (no under-provisioning risk)
+  NO → Continue
+
+Is traffic predictable (within 2x over 24 hours)?
+  YES → Provisioned + Auto Scaling
+
+Will this table run at high throughput for 1+ years?
+  YES → Provisioned + Reserved Capacity (maximum savings)
+```
+
+### RDS cost optimization sequence
+
+```
+1. Enable Performance Insights → identify over-provisioned instances
+2. Right-size instance class (biggest saving lever)
+3. Add ElastiCache for read-heavy workloads (reduces load → smaller instance)
+4. Purchase Reserved Instance once right-sized (lock in discount)
+5. For dev/test: migrate to Aurora Serverless v2 (eliminates idle cost)
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create an Aurora Serverless v2 Cluster
+
+```bash
+# Create a subnet group (required for RDS/Aurora)
+aws rds create-db-subnet-group \
+  --db-subnet-group-name my-aurora-subnet-group \
+  --db-subnet-group-description "Aurora Serverless v2 subnet group" \
+  --subnet-ids subnet-0a1b2c3d subnet-0e4f5g6h
+
+# Create the Aurora Serverless v2 cluster
+aws rds create-db-cluster \
+  --db-cluster-identifier my-serverless-cluster \
+  --engine aurora-mysql \
+  --engine-version 8.0.mysql_aurora.3.02.0 \
+  --master-username admin \
+  --master-user-password MySecurePassword123! \
+  --db-subnet-group-name my-aurora-subnet-group \
+  --serverless-v2-scaling-configuration MinCapacity=0.5,MaxCapacity=16 \
+  --vpc-security-group-ids sg-0a1b2c3d
+
+# Add a Serverless v2 writer instance to the cluster
+aws rds create-db-instance \
+  --db-instance-identifier my-serverless-writer \
+  --db-cluster-identifier my-serverless-cluster \
+  --db-instance-class db.serverless \
+  --engine aurora-mysql
+
+# Verify scaling configuration
+aws rds describe-db-clusters \
+  --db-cluster-identifier my-serverless-cluster \
+  --query 'DBClusters[0].ServerlessV2ScalingConfiguration'
+```
+
+### Switch DynamoDB Table to On-Demand Billing
+
+```bash
+# Check current billing mode
+aws dynamodb describe-table \
+  --table-name my-orders-table \
+  --query 'Table.BillingModeSummary'
+
+# Switch to On-Demand
+aws dynamodb update-table \
+  --table-name my-orders-table \
+  --billing-mode PAY_PER_REQUEST
+
+# Switch back to Provisioned with Auto Scaling
+aws dynamodb update-table \
+  --table-name my-orders-table \
+  --billing-mode PROVISIONED \
+  --provisioned-throughput ReadCapacityUnits=100,WriteCapacityUnits=50
+```
+
+### Enable DynamoDB Auto Scaling
+
+```bash
+# Register the DynamoDB table as a scalable target (write capacity)
+aws application-autoscaling register-scalable-target \
+  --service-namespace dynamodb \
+  --resource-id "table/my-orders-table" \
+  --scalable-dimension "dynamodb:table:WriteCapacityUnits" \
+  --min-capacity 5 \
+  --max-capacity 500
+
+# Create a scaling policy targeting 70% utilization
+aws application-autoscaling put-scaling-policy \
+  --service-namespace dynamodb \
+  --resource-id "table/my-orders-table" \
+  --scalable-dimension "dynamodb:table:WriteCapacityUnits" \
+  --policy-name "WriteAutoScalingPolicy" \
+  --policy-type "TargetTrackingScaling" \
+  --target-tracking-scaling-policy-configuration '{
+    "TargetValue": 70.0,
+    "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "DynamoDBWriteCapacityUtilization"
+    },
+    "ScaleInCooldown": 60,
+    "ScaleOutCooldown": 60
+  }'
+```
+
+### Create an RDS Proxy
+
+```bash
+# First, store the DB credentials in Secrets Manager
+aws secretsmanager create-secret \
+  --name prod/myapp/rds-credentials \
+  --secret-string '{"username":"admin","password":"MySecurePassword123!"}'
+
+# Create the RDS Proxy
+aws rds create-db-proxy \
+  --db-proxy-name my-rds-proxy \
+  --engine-family MYSQL \
+  --auth '[{
+    "AuthScheme": "SECRETS",
+    "SecretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/myapp/rds-credentials",
+    "IAMAuth": "DISABLED"
+  }]' \
+  --role-arn arn:aws:iam::123456789012:role/rds-proxy-role \
+  --vpc-subnet-ids subnet-0a1b2c3d subnet-0e4f5g6h
+
+# Register the proxy to the RDS instance
+aws rds register-db-proxy-targets \
+  --db-proxy-name my-rds-proxy \
+  --db-instance-identifiers my-rds-instance
+
+# Get the proxy endpoint (use this in your Lambda connection string)
+aws rds describe-db-proxies \
+  --db-proxy-name my-rds-proxy \
+  --query 'DBProxies[0].Endpoint'
+```
+
+### Purchase RDS Reserved Instance
+
+```bash
+# List available RDS Reserved Instance offerings
+aws rds describe-reserved-db-instances-offerings \
+  --db-instance-class db.r6g.large \
+  --duration 31536000 \
+  --product-description "mysql" \
+  --multi-az \
+  --offering-type "All Upfront" \
+  --query 'ReservedDBInstancesOfferings[*].{OfferingId:ReservedDBInstancesOfferingId,Class:DBInstanceClass,Duration:Duration,FixedPrice:FixedPrice,UsagePrice:UsagePrice}' \
+  --output table
+
+# Purchase the reservation (replace offering ID from above query)
+# aws rds purchase-reserved-db-instances-offering \
+#   --reserved-db-instances-offering-id <offering-id> \
+#   --db-instance-count 1
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Aurora Serverless v2 for variable/dev workloads**: Questions about reducing costs for development databases or applications with variable load patterns should lead to Aurora Serverless v2. The key attribute is that it scales down during idle periods, eliminating idle instance charges.
+- **DynamoDB On-Demand vs Provisioned break-even**: On-Demand is best for unpredictable or spiky traffic. Provisioned + Auto Scaling is better for predictable traffic. The exam will describe a traffic pattern and ask you to choose — look for clues like "unpredictable," "spiky," "new application" (On-Demand) vs "consistent," "predictable," "millions of requests daily" (Provisioned).
+- **RDS Proxy for Lambda connections**: When a scenario describes Lambda functions connecting to RDS and experiencing connection errors or needing a larger RDS instance to handle connection volume, RDS Proxy is the answer. It pools connections and allows right-sizing the RDS instance down.
+- **ElastiCache enabling smaller RDS**: Adding cache is sometimes the indirect answer to "reduce database costs" — caching read traffic reduces RDS load, enabling a smaller instance class with a significantly lower cost.
+- **RDS Reserved Instances per-engine rule**: An RDS Reserved Instance is engine-specific. If a company migrates from MySQL to PostgreSQL, existing MySQL RIs provide no discount for PostgreSQL instances.
+
+## Common Traps
+
+- **Aurora Serverless v2 ≠ free during idle**: It scales to a minimum of 0.5 ACU, not zero. There is still a small charge during idle periods. For complete elimination of idle compute costs, consider stopping a standard RDS instance during off-hours instead (though this requires automation and brief unavailability during start-up).
+- **DynamoDB Reserved Capacity applies to provisioned, not On-Demand**: Reserved Capacity provides discounts on provisioned WCU/RCU rates. It has no effect on DynamoDB On-Demand (PAY_PER_REQUEST) billing mode. Switching to On-Demand while having Reserved Capacity wastes the commitment.
+- **RDS Proxy adds latency**: RDS Proxy introduces a small amount of connection latency (typically <1ms). For latency-sensitive applications, this trade-off must be considered — though for Lambda use cases the connection overhead saved far outweighs the proxy latency.
+</ExamAngle>
+
+<Flashcard front="When should you use Aurora Serverless v2 instead of a provisioned Aurora cluster?" back="Use Aurora Serverless v2 for development/test environments, new applications with unknown traffic, or workloads with significant idle periods or sharp traffic cycles. It scales ACUs automatically and bills only for capacity consumed, eliminating idle instance charges." />
+<Flashcard front="What is the key difference between DynamoDB On-Demand and Provisioned + Auto Scaling?" back="On-Demand: pay per request, no capacity planning, handles any traffic spike instantly, higher per-unit cost. Provisioned + Auto Scaling: lower per-unit cost, some lag in scaling, may throttle during sudden spikes. On-Demand is best for unpredictable traffic; Provisioned is better for predictable traffic." />
+<Flashcard front="Why is RDS Proxy important for Lambda-to-RDS architectures?" back="Lambda creates a new database connection per execution environment. Under high concurrency, this exhausts RDS connection limits. RDS Proxy maintains a persistent connection pool and multiplexes many Lambda connections over few actual DB connections, enabling a smaller RDS instance." />
+<Flashcard front="How does adding ElastiCache reduce RDS costs?" back="ElastiCache absorbs repeated read queries before they reach RDS. If 60% of reads are cache hits, RDS handles 40% of its former load. This often allows downsizing the RDS instance class by one or two sizes, saving more per month than the ElastiCache nodes cost." />
+<Flashcard front="What is DynamoDB Reserved Capacity and when does it apply?" back="A 1 or 3-year commitment to a minimum number of Read and Write Capacity Units in Provisioned billing mode, providing up to 76% savings. It only applies to Provisioned mode — switching to On-Demand (PAY_PER_REQUEST) mode voids the reserved capacity discount." />
+
+{/* QUIZ
+[
+  {
+    "id": "d4-3-q01",
+    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A startup is building a new SaaS application with an unknown growth trajectory. They expect low traffic initially (a few hundred users) growing potentially to millions. Their database is MySQL-compatible and they want to minimize costs during the early phase while ensuring the database can scale automatically as user numbers grow. Which database option best meets these requirements?",
+    "options": [
+      { "id": "A", "text": "RDS MySQL db.m5.xlarge with Multi-AZ" },
+      { "id": "B", "text": "Aurora MySQL provisioned cluster with a db.r6g.large instance" },
+      { "id": "C", "text": "Aurora Serverless v2 with minimum 0.5 ACU and maximum 128 ACU" },
+      { "id": "D", "text": "RDS MySQL db.t3.micro with read replicas added as needed" }
+    ],
+    "correct": ["C"],
+    "rationale": "Aurora Serverless v2 automatically scales between 0.5 and 128 ACU based on actual load. During the low-traffic early phase, it scales down to 0.5 ACU (minimal cost). As the application grows to millions of users, it scales up automatically without manual intervention. RDS MySQL (A and D) require manual instance resizing or adding read replicas, creating operational overhead. Aurora provisioned (B) fixes capacity at db.r6g.large, which over-provisions early on and may need resizing as traffic grows.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html",
+    "tags": ["aurora-serverless", "cost", "auto-scaling", "startup"]
+  },
+  {
+    "id": "d4-3-q02",
+    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company has a DynamoDB table for an e-commerce cart service that experiences extremely spiky traffic: 10 WCU during off-peak hours (10pm–8am) and bursts to 50,000 WCU during flash sales that happen without warning. The current Provisioned mode with Auto Scaling frequently throttles writes during flash sales. What change reduces costs while eliminating throttling?",
+    "options": [
+      { "id": "A", "text": "Increase provisioned WCU to 50,000 permanently" },
+      { "id": "B", "text": "Switch to DynamoDB On-Demand billing mode" },
+      { "id": "C", "text": "Add a DynamoDB Accelerator (DAX) cluster" },
+      { "id": "D", "text": "Enable DynamoDB global tables for multi-region replication" }
+    ],
+    "correct": ["B"],
+    "rationale": "DynamoDB On-Demand billing mode instantly accommodates any traffic level without throttling and charges only for actual requests. For this workload with extreme spikiness (10 to 50,000 WCU, a 5,000x swing) and unpredictable timing, On-Demand is both technically correct and cost-effective — you pay for the 10 WCU periods cheaply and handle the flash sale bursts without throttling. Provisioning 50,000 WCU permanently (A) is very expensive during the 14 hours of off-peak time. DAX (C) helps reads, not writes. Global tables (D) adds replication cost and doesn't solve throttling.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html",
+    "tags": ["dynamodb", "on-demand", "cost", "throttling"]
+  },
+  {
+    "id": "d4-3-q03",
+    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company runs a read-heavy web application with an RDS MySQL db.r6g.2xlarge instance. CloudWatch shows CPU averaging 75% with most load from SELECT queries. The engineering team is considering upgrading to db.r6g.4xlarge, which would double their RDS cost. A solutions architect proposes an alternative. Which approach reduces cost while addressing the read load?",
+    "options": [
+      { "id": "A", "text": "Add an ElastiCache for Redis cluster to cache frequent read queries, then right-size RDS down to db.r6g.large" },
+      { "id": "B", "text": "Upgrade to db.r6g.4xlarge and purchase a 3-year Reserved Instance" },
+      { "id": "C", "text": "Enable RDS Multi-AZ to distribute read load across primary and standby" },
+      { "id": "D", "text": "Enable automated backups and use Performance Insights to tune slow queries" }
+    ],
+    "correct": ["A"],
+    "rationale": "Adding ElastiCache absorbs repeated read queries before they reach RDS. If caching reduces RDS read load significantly (e.g., 60%+ cache hit rate), the RDS instance load drops enough to right-size down from db.r6g.2xlarge to db.r6g.large. The cost reduction from the smaller RDS instance often exceeds the ElastiCache cost, netting a lower total bill AND better performance. Upgrading to 4xlarge (B) doubles cost. Multi-AZ standby (C) does NOT serve read traffic — it's only for failover. Performance Insights tuning (D) may help but doesn't address fundamental read scaling.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html",
+    "tags": ["elasticache", "rds", "cost", "read-scaling"]
+  },
+  {
+    "id": "d4-3-q04",
+    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A serverless application uses AWS Lambda functions that connect to an RDS PostgreSQL instance. During peak hours, 500+ Lambda functions execute simultaneously, causing 'too many connections' errors on RDS. The team increased the instance to db.r6g.4xlarge to support more connections, but costs doubled. What is the most cost-effective solution?",
+    "options": [
+      { "id": "A", "text": "Deploy RDS Proxy between Lambda and RDS, then downsize the RDS instance" },
+      { "id": "B", "text": "Configure Lambda reserved concurrency to limit simultaneous executions" },
+      { "id": "C", "text": "Switch to Amazon Aurora PostgreSQL with Aurora Auto Scaling" },
+      { "id": "D", "text": "Add connection retry logic with exponential backoff in Lambda" }
+    ],
+    "correct": ["A"],
+    "rationale": "RDS Proxy maintains a persistent connection pool to RDS and multiplexes hundreds of Lambda connections over a small number of actual DB connections, eliminating the 'too many connections' error. This allows downsizing the RDS instance back to a smaller class (e.g., db.r6g.large), reducing cost significantly. The RDS Proxy cost ($0.015/vCPU/hour) is minimal compared to the RDS instance savings. Limiting Lambda concurrency (B) would degrade application performance. Switching to Aurora (C) doesn't solve the connection problem. Retry logic (D) doesn't reduce connection count — it just retries failed connections.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.html",
+    "tags": ["rds-proxy", "lambda", "connections", "cost"]
+  },
+  {
+    "id": "d4-3-q05",
+    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "domain": 4,
+    "difficulty": "easy",
+    "type": "single",
+    "stem": "A company has been running a MySQL RDS instance (db.r6g.2xlarge, Multi-AZ) continuously for 6 months. Performance Insights shows the workload is stable and predictable. They plan to keep the database running for at least 3 more years. What action provides the greatest cost reduction for this stable workload?",
+    "options": [
+      { "id": "A", "text": "Migrate to Aurora Serverless v2 to save on idle time" },
+      { "id": "B", "text": "Purchase a 3-year All-Upfront RDS Reserved Instance for db.r6g.2xlarge Multi-AZ MySQL" },
+      { "id": "C", "text": "Enable Performance Insights Extended Retention for better monitoring" },
+      { "id": "D", "text": "Switch to a Single-AZ deployment to halve the instance cost" }
+    ],
+    "correct": ["B"],
+    "rationale": "For a stable, predictable workload running 24/7 for 3+ years, a 3-year All-Upfront RDS Reserved Instance provides the maximum discount (~69%) compared to On-Demand pricing. Since the workload has already been running 6 months and Performance Insights confirms stability, there is no risk of purchasing the wrong instance class. Aurora Serverless v2 (A) is for variable workloads — this workload is stable and predictable, so a fixed instance with RI is cheaper. Performance Insights Extended Retention (C) adds cost, not savings. Single-AZ (D) reduces the Multi-AZ standby cost but removes high-availability protection, which may be unacceptable for production.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithReservedDBInstances.html",
+    "tags": ["rds", "reserved-instances", "cost", "stable-workload"]
+  }
+]
+*/}

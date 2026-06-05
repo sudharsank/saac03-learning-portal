@@ -5,6 +5,451 @@ domain: 1
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 1.2 — Design Secure Workloads and Applications
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Securing workloads and applications in AWS requires a **defense-in-depth** strategy: multiple, overlapping layers of controls so that the failure of any single layer does not expose the entire system. AWS provides network-level controls (VPC, Security Groups, NACLs), application-level controls (WAF), and DDoS protection (Shield) that work together to protect workloads from both external attacks and internal lateral movement.
+
+A well-designed VPC architecture separates public-facing tiers (load balancers, CDN origins) from private compute tiers (EC2, containers, databases) using subnet segmentation. Traffic between tiers is controlled by Security Groups at the ENI level and Network ACLs at the subnet level. Application traffic entering from the internet first passes through AWS WAF and Shield before reaching any compute resource.
+
+Operational access to private instances no longer requires a bastion host or open SSH port. AWS Systems Manager Session Manager provides browser-based and CLI shell access through the SSM agent — eliminating inbound port 22 or 3389 requirements and providing full audit trails in CloudTrail and CloudWatch Logs.
+
+## Key Components
+
+- **VPC (Virtual Private Cloud)** — An isolated network in AWS where you define your IP address range, subnets, route tables, and gateways.
+- **Public Subnet** — A subnet whose route table has a route to an Internet Gateway. Resources here can send/receive internet traffic (if they have a public IP or Elastic IP).
+- **Private Subnet** — A subnet with no route to an Internet Gateway. Resources use a NAT Gateway (in the public subnet) to initiate outbound internet calls without being reachable inbound.
+- **Security Groups (SGs)** — Stateful, virtual firewalls attached at the **Elastic Network Interface (ENI)** level. Stateful means return traffic is automatically allowed.
+- **Network ACLs (NACLs)** — Stateless, ordered rule lists applied at the **subnet** level. Stateless means return traffic must be explicitly allowed. Rules are evaluated lowest number first; first match wins.
+- **VPC Flow Logs** — Captures IP traffic metadata (not payload) for VPC, subnet, or ENI. Published to CloudWatch Logs or S3. Used for troubleshooting and security analysis.
+- **AWS WAF** — Layer 7 firewall. Inspects HTTP/S requests and applies rules (IP sets, managed rule groups, regex patterns, rate limiting, geo-blocking). Integrated with ALB, CloudFront, API Gateway, AppSync.
+- **AWS Shield Standard** — Free, always-on DDoS protection for all AWS resources (Layers 3/4).
+- **AWS Shield Advanced** — Paid ($3,000/month + data transfer) add-on with Layer 7 DDoS protection, real-time attack visibility, DDoS Response Team (DRT) support, and cost protection.
+- **AWS Firewall Manager** — Centrally manage WAF, Shield Advanced, Security Groups, and Network Firewall policies across all accounts in an AWS Organization.
+- **AWS Network Firewall** — Managed stateful network firewall and IDS/IPS at the VPC level. Supports Suricata-compatible rule groups for deep packet inspection.
+- **AWS PrivateLink** — Provides private connectivity between VPCs and AWS services (or your own services) without traversing the public internet. Creates VPC Endpoints backed by Elastic Network Interfaces.
+- **SSM Session Manager** — Secure, audited shell access to EC2 instances through the SSM agent. No open inbound ports required.
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Security Groups vs. Network ACLs
+
+| Feature | Security Groups | Network ACLs |
+|---|---|---|
+| Level | ENI (instance level) | Subnet level |
+| State | **Stateful** — return traffic auto-allowed | **Stateless** — must explicitly allow inbound AND outbound |
+| Default | All inbound denied, all outbound allowed | Allow all inbound and outbound |
+| Rules | Allow rules only (no explicit deny) | Allow AND deny rules |
+| Rule evaluation | All rules evaluated together | Rules evaluated in order (lowest number first), first match wins |
+| Association | Multiple SGs per ENI | One NACL per subnet |
+| Use case | Instance-level micro-segmentation | Subnet-level guardrails, explicit deny for IP blocks |
+
+**NACL ephemeral ports**: Because NACLs are stateless, outbound responses travel on ephemeral ports (1024-65535). You must allow outbound TCP 1024-65535 (or the specific ephemeral range) in the NACL outbound rules to permit return traffic for inbound connections.
+
+### VPC Architecture Tiers
+
+A standard three-tier architecture:
+
+```
+Internet → Internet Gateway
+            ↓
+        Public Subnet (ALB, NAT Gateway)
+            ↓ (private routing)
+        Private App Subnet (EC2, ECS, Lambda in VPC)
+            ↓ (private routing)
+        Private Data Subnet (RDS, ElastiCache)
+```
+
+- Internet Gateway: provides internet access for public subnets.
+- NAT Gateway: placed in a public subnet. Private subnet instances route 0.0.0.0/0 to the NAT Gateway for outbound internet (software updates, API calls). NAT Gateway does NOT allow inbound connections from internet.
+- ALB sits in public subnets across multiple AZs. Its security group allows inbound 443 from 0.0.0.0/0. EC2 security group allows inbound only from the ALB security group (not from internet directly).
+
+### AWS WAF Rule Processing
+
+WAF evaluates rules in **priority order** (lower number = higher priority). Rule actions:
+- **Allow** — Request passes through immediately; no further rules evaluated.
+- **Block** — Request rejected with 403; no further rules evaluated.
+- **Count** — Request counted but not blocked; continues to next rules. Used for testing new rules.
+- **CAPTCHA** — Challenges the client with a CAPTCHA puzzle.
+
+Key rule types:
+- **IP set match** — Block/allow specific IP addresses or CIDR ranges.
+- **Managed rule groups** — AWS or third-party prebuilt rules (Core Rule Set blocks OWASP Top 10, SQLi, XSS; Known Bad Inputs, Anonymous IP list, etc.).
+- **Rate-based rules** — Automatically block IPs that exceed N requests per 5 minutes. Used for brute force and scraping protection.
+- **Geo-match rules** — Allow or block requests from specific countries.
+- **Label match** — Chain rules: early rules add labels, later rules match labels.
+
+### AWS Shield
+
+| Feature | Standard | Advanced |
+|---|---|---|
+| Cost | Free | $3,000/month + data transfer fees |
+| Activation | Automatic for all accounts | Must subscribe and enable |
+| DDoS protection | L3/L4 (SYN flood, UDP reflection) | L3/L4 + L7 |
+| Visibility | None | Real-time attack metrics in console |
+| DRT (DDoS Response Team) | No | Yes — 24/7 support during attacks |
+| Cost protection | No | Yes — credits for scaling costs during attacks |
+| Health-based detection | No | Yes — uses Route 53 health checks |
+| Automatic WAF rules | No | Yes — DRT can create WAF rules on your behalf |
+
+### SSM Session Manager vs. Bastion Host
+
+| Feature | Bastion Host | SSM Session Manager |
+|---|---|---|
+| Security group | Requires inbound port 22/3389 | No inbound ports required |
+| Key management | SSH key pairs on instance | IAM role + SSM agent |
+| Cost | EC2 instance cost | No additional cost (SSM is free) |
+| Audit | Manual key management | Full session logs in CloudTrail + optionally S3/CW Logs |
+| Access | Must be in network path | Works over HTTPS outbound from instance to SSM endpoint |
+| Prerequisites | Open SG inbound rule | SSM agent, IAM role with ssm:StartSession permission, VPC endpoint (for private subnets) |
+
+For instances in private subnets with no internet access, you need **VPC endpoints for SSM** (`ssm`, `ssmmessages`, `ec2messages`) instead of a NAT Gateway.
+
+### AWS PrivateLink
+
+PrivateLink creates a private connection between your VPC and an AWS service (or an endpoint service you expose). Traffic never leaves the AWS network.
+
+- **Interface endpoint** — ENI in your subnet with a private IP. Used for most AWS services (S3, DynamoDB, SSM, Secrets Manager, EC2, etc.) and PrivateLink.
+- **Gateway endpoint** — Route table entry (no ENI). Available for S3 and DynamoDB only. Free.
+- **Gateway Load Balancer endpoint** — Used with GWLB for inline traffic inspection.
+
+Use PrivateLink when: instances in private subnets must reach AWS services without NAT Gateway, or when you expose a service to other VPCs/accounts without VPC peering.
+
+## Decision Flow
+
+| Requirement | Solution |
+|---|---|
+| Block traffic from specific IP ranges | NACL deny rule OR WAF IP set block |
+| Allow return traffic for a web server | Security Group (stateful — automatic). With NACL, add explicit outbound rule for ephemeral ports |
+| Protect ALB from SQL injection | AWS WAF with Core Rule Set (SQLi rule group) on the ALB |
+| DDoS protection for a public-facing API | Shield Standard (free, automatic) + WAF rate-based rules |
+| $3k/month paid DDoS with DRT support | Shield Advanced |
+| Shell access to private EC2, no port 22 | SSM Session Manager with IAM role and ssm:StartSession permission |
+| Private EC2 needs to reach S3 | VPC Gateway Endpoint for S3 (free, no NAT needed) |
+| Centrally enforce SG rules across 50 accounts | AWS Firewall Manager |
+| Inspect packet content (IPS/IDS) at VPC level | AWS Network Firewall |
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Exercise 1 — Create a VPC with Public and Private Subnets
+
+```bash
+# 1. Create the VPC
+VPC_ID=$(aws ec2 create-vpc \
+  --cidr-block 10.0.0.0/16 \
+  --query 'Vpc.VpcId' --output text)
+aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=SecureVPC
+
+# 2. Create an Internet Gateway and attach it
+IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --vpc-id $VPC_ID --internet-gateway-id $IGW_ID
+
+# 3. Create public and private subnets
+PUBLIC_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 \
+  --availability-zone us-east-1a --query 'Subnet.SubnetId' --output text)
+PRIVATE_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 \
+  --availability-zone us-east-1a --query 'Subnet.SubnetId' --output text)
+
+# 4. Create a public route table with internet route
+PUBLIC_RT=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $PUBLIC_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+aws ec2 associate-route-table --route-table-id $PUBLIC_RT --subnet-id $PUBLIC_SUBNET
+
+# 5. Create a NAT Gateway for private subnet outbound
+EIP=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+NAT_GW=$(aws ec2 create-nat-gateway \
+  --subnet-id $PUBLIC_SUBNET --allocation-id $EIP \
+  --query 'NatGateway.NatGatewayId' --output text)
+echo "NAT Gateway ID: $NAT_GW (wait ~60s for it to become available)"
+
+# 6. Add private route table pointing to NAT Gateway
+PRIVATE_RT=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+# Wait for NAT GW to be available first, then:
+aws ec2 create-route --route-table-id $PRIVATE_RT --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT_GW
+aws ec2 associate-route-table --route-table-id $PRIVATE_RT --subnet-id $PRIVATE_SUBNET
+```
+
+### Exercise 2 — Create Tiered Security Groups
+
+```bash
+# ALB security group — accept HTTPS from internet
+ALB_SG=$(aws ec2 create-security-group \
+  --group-name alb-sg --description "ALB inbound HTTPS" \
+  --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress \
+  --group-id $ALB_SG --protocol tcp --port 443 --cidr 0.0.0.0/0
+
+# App server security group — accept traffic only from ALB SG
+APP_SG=$(aws ec2 create-security-group \
+  --group-name app-sg --description "App server from ALB only" \
+  --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress \
+  --group-id $APP_SG --protocol tcp --port 8080 \
+  --source-group $ALB_SG
+
+# DB security group — accept traffic only from app server SG
+DB_SG=$(aws ec2 create-security-group \
+  --group-name db-sg --description "DB from app servers only" \
+  --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress \
+  --group-id $DB_SG --protocol tcp --port 5432 \
+  --source-group $APP_SG
+
+echo "ALB SG: $ALB_SG, App SG: $APP_SG, DB SG: $DB_SG"
+```
+
+### Exercise 3 — Create a NACL with Ordered Rules
+
+```bash
+# Create NACL for the private subnet
+NACL_ID=$(aws ec2 create-network-acl \
+  --vpc-id $VPC_ID --query 'NetworkAcl.NetworkAclId' --output text)
+
+# Allow inbound HTTPS from VPC range (10.0.0.0/16)
+aws ec2 create-network-acl-entry \
+  --network-acl-id $NACL_ID --rule-number 100 \
+  --protocol tcp --port-range From=443,To=443 \
+  --cidr-block 10.0.0.0/16 --rule-action allow --ingress
+
+# Allow inbound ephemeral return traffic (stateless!)
+aws ec2 create-network-acl-entry \
+  --network-acl-id $NACL_ID --rule-number 200 \
+  --protocol tcp --port-range From=1024,To=65535 \
+  --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+# Deny all other inbound (explicit catch-all — rule 32766 is AWS default deny *)
+aws ec2 create-network-acl-entry \
+  --network-acl-id $NACL_ID --rule-number 300 \
+  --protocol -1 --cidr-block 0.0.0.0/0 --rule-action deny --ingress
+
+# Allow all outbound to VPC
+aws ec2 create-network-acl-entry \
+  --network-acl-id $NACL_ID --rule-number 100 \
+  --protocol -1 --cidr-block 10.0.0.0/16 --rule-action allow --egress
+
+# Associate NACL with private subnet
+aws ec2 replace-network-acl-association \
+  --network-acl-id $NACL_ID \
+  --association-id $(aws ec2 describe-network-acls \
+    --filters Name=association.subnet-id,Values=$PRIVATE_SUBNET \
+    --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text)
+```
+
+### Exercise 4 — Create a WAF Web ACL with Rate-Based Rule
+
+```bash
+# Create a WAF Web ACL (for ALB — use REGIONAL scope)
+aws wafv2 create-web-acl \
+  --name SecureWebACL \
+  --scope REGIONAL \
+  --default-action Allow={} \
+  --rules '[
+    {
+      "Name": "RateLimitRule",
+      "Priority": 1,
+      "Action": { "Block": {} },
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 2000,
+          "AggregateKeyType": "IP"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "RateLimit"
+      }
+    },
+    {
+      "Name": "AWSManagedRulesCommonRuleSet",
+      "Priority": 2,
+      "OverrideAction": { "None": {} },
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesCommonRuleSet"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "CommonRuleSet"
+      }
+    }
+  ]' \
+  --visibility-config SampledRequestsEnabled=true,CloudWatchMetricsEnabled=true,MetricName=SecureWebACL \
+  --region us-east-1
+```
+
+### Exercise 5 — Enable SSM Session Manager Access (No SSH)
+
+```bash
+# 1. Create IAM role for EC2 with SSM permissions
+cat > ssm-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+}
+EOF
+
+aws iam create-role --role-name EC2SSMRole --assume-role-policy-document file://ssm-trust.json
+aws iam attach-role-policy \
+  --role-name EC2SSMRole \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+aws iam create-instance-profile --instance-profile-name EC2SSMProfile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name EC2SSMProfile --role-name EC2SSMRole
+
+# 2. Launch EC2 in PRIVATE subnet — NO port 22 open in SG
+PRIVATE_SG=$(aws ec2 create-security-group \
+  --group-name private-ssm-sg --description "No inbound ports" \
+  --vpc-id $VPC_ID --query 'GroupId' --output text)
+# Note: No inbound rules added!
+
+aws ec2 run-instances \
+  --image-id ami-0abcdef1234567890 \
+  --instance-type t3.micro \
+  --iam-instance-profile Name=EC2SSMProfile \
+  --security-group-ids $PRIVATE_SG \
+  --subnet-id $PRIVATE_SUBNET \
+  --count 1
+
+# 3. Start a session (no SSH, no bastion, no key pair needed)
+# Get the instance ID first
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --filters Name=subnet-id,Values=$PRIVATE_SUBNET Name=instance-state-name,Values=running \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+
+aws ssm start-session --target $INSTANCE_ID
+# Opens an interactive shell session through SSM
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Security Groups are stateful; NACLs are stateless** — For a SG: if you allow inbound TCP 80, the return traffic is automatically allowed outbound. For a NACL: you must have an inbound rule allowing port 80 AND an outbound rule allowing ephemeral ports 1024-65535 for the response.
+- **NACL rule evaluation order** — Rules are evaluated from lowest to highest number, and the **first matching rule wins**. If rule 100 allows and rule 200 denies the same traffic, the allow wins. You can use deny rules in NACLs (Security Groups cannot deny).
+- **WAF is Layer 7** — WAF operates on HTTP/HTTPS content (headers, body, URI, query strings). Shield operates at Layers 3/4 (TCP/UDP floods, amplification attacks). A question about blocking SQL injection → WAF. A question about SYN flood protection → Shield.
+- **Shield Standard is free and always on** — No configuration needed. Shield Advanced costs $3,000/month and adds DRT support, cost protection, and Layer 7 DDoS mitigation with WAF.
+- **SSM Session Manager eliminates bastion hosts** — The answer to "how do you access private EC2 without port 22 open" is always SSM Session Manager. It requires the SSM agent, an IAM role with `AmazonSSMManagedInstanceCore`, and (for private subnets without NAT) VPC interface endpoints for `ssm`, `ssmmessages`, and `ec2messages`.
+- **NACLs for subnet-level IP blocking** — If you need to explicitly block an IP range at the subnet boundary (e.g., block a known bad CIDR), use a NACL deny rule. Security Groups cannot deny — they only allow.
+
+## Common Traps
+
+- **Forgetting ephemeral ports in NACLs** — A very common exam trap: you create an inbound allow for port 443 in a NACL but forget the outbound rule for ephemeral ports 1024-65535. The connection silently fails because the response packets are blocked. Security Groups never have this issue.
+- **Confusing WAF scopes** — WAF associated with ALB or API Gateway uses `REGIONAL` scope. WAF associated with CloudFront uses `CLOUDFRONT` scope and must be created in `us-east-1` (N. Virginia), not the region where CloudFront is deployed.
+- **Shield Advanced is not automatic** — Unlike Shield Standard, Shield Advanced requires explicit subscription per account and per resource registration. Simply having an AWS account does not give you DRT access.
+</ExamAngle>
+
+<Flashcard front="What is the key difference between Security Groups and NACLs?" back="Security Groups are STATEFUL (return traffic auto-allowed) and operate at the ENI level with allow-only rules. NACLs are STATELESS (return traffic must be explicitly allowed), operate at the subnet level, support both allow and deny rules, and evaluate rules in numeric order with first-match wins." />
+<Flashcard front="Why do NACLs need outbound rules for ephemeral ports?" back="NACLs are stateless — they do not track connection state. When a client connects to port 443, the response travels back on a random ephemeral port (1024-65535). Without an explicit outbound NACL rule allowing those ports, the response packets are dropped." />
+<Flashcard front="What does AWS WAF protect against that AWS Shield does not?" back="WAF is a Layer 7 (application layer) firewall that inspects HTTP/S content — blocking SQL injection, XSS, bad bots, rate abuse, and geo-restricted traffic. Shield protects at Layers 3/4 against network-level DDoS attacks (SYN floods, UDP reflection). They are complementary." />
+<Flashcard front="How does SSM Session Manager provide shell access without port 22?" back="The SSM agent on the instance makes an HTTPS outbound connection to the SSM service endpoint. All traffic flows over port 443 outbound — no inbound ports are needed. Access is controlled by IAM (ssm:StartSession) and sessions are logged to CloudTrail." />
+<Flashcard front="When would you use a VPC Gateway Endpoint vs. an Interface Endpoint?" back="Gateway Endpoints are free, use route table entries, and only support S3 and DynamoDB. Interface Endpoints use ENIs with private IPs, cost per hour + data, and support most other AWS services. For S3/DynamoDB in private subnets, prefer Gateway Endpoints to avoid NAT Gateway costs." />
+
+{/* QUIZ
+[
+  {
+    "id": "d1-1-2-q01",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A web application running behind an Application Load Balancer (ALB) is receiving a large number of SQL injection attempts. Which AWS service should be configured on the ALB to detect and block these attacks?",
+    "options": [
+      { "id": "A", "text": "AWS Shield Advanced" },
+      { "id": "B", "text": "AWS WAF with the AWSManagedRulesSQLiRuleSet" },
+      { "id": "C", "text": "A Network ACL deny rule for the attacker's IP" },
+      { "id": "D", "text": "AWS Inspector to scan the application code" }
+    ],
+    "correct": ["B"],
+    "rationale": "WAF is a Layer 7 firewall that inspects HTTP request content including headers, body, and query strings. The AWSManagedRulesSQLiRuleSet (part of the Core Rule Set) detects and blocks SQL injection patterns. Shield Advanced protects against Layer 3/4 DDoS attacks, not application-layer exploits. NACLs operate at Layer 4 and cannot inspect HTTP body content. Inspector scans EC2 instances for vulnerabilities but does not block active attacks.",
+    "sourceUrl": "https://docs.aws.amazon.com/waf/latest/developerguide/what-is-aws-waf.html",
+    "tags": ["waf", "sql-injection", "layer7", "managed-rules"]
+  },
+  {
+    "id": "d1-1-2-q02",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A security engineer configures a Network ACL for a private subnet. Rule 100 allows inbound TCP port 443 from 0.0.0.0/0. There are no other inbound rules except the default rule 32767 (deny all). HTTPS clients report that connections are established but they never receive responses. What is the MOST likely cause?",
+    "options": [
+      { "id": "A", "text": "The Security Group on the instances does not allow outbound traffic." },
+      { "id": "B", "text": "The NACL has no outbound rule allowing TCP ephemeral ports (1024-65535), so response packets are dropped." },
+      { "id": "C", "text": "Rule 100 should be rule 1 — NACL rules must start at rule number 1." },
+      { "id": "D", "text": "NACLs do not support TCP traffic — only UDP rules can be created." }
+    ],
+    "correct": ["B"],
+    "rationale": "NACLs are stateless. Inbound rule 100 allows the request on port 443, but the TCP response travels from the instance back to the client on an ephemeral source port (1024-65535). Without an outbound NACL rule allowing those ports, the response packets are silently dropped. Security Groups are stateful — if they allow inbound 443, outbound return traffic is automatic and not the issue. NACL rule numbering can start anywhere from 1-32766.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html",
+    "tags": ["nacl", "stateless", "ephemeral-ports", "vpc"]
+  },
+  {
+    "id": "d1-1-2-q03",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company wants to provide shell access to their EC2 instances in private subnets for their operations team. The security policy prohibits opening inbound port 22 from any source. Which solution satisfies both requirements?",
+    "options": [
+      { "id": "A", "text": "Deploy a bastion host in the public subnet and add an inbound rule for port 22 from the operations team's office IP." },
+      { "id": "B", "text": "Use AWS Systems Manager Session Manager with an IAM role attached to the EC2 instances." },
+      { "id": "C", "text": "Use EC2 Instance Connect with the instance's security group allowing port 22 from the EC2 Instance Connect service IP range." },
+      { "id": "D", "text": "Configure a Site-to-Site VPN and open port 22 on the security group for the VPN CIDR." }
+    ],
+    "correct": ["B"],
+    "rationale": "SSM Session Manager provides interactive shell access through the SSM agent using outbound HTTPS (port 443) from the instance to the SSM service endpoint. No inbound ports are required on the security group. It requires the AmazonSSMManagedInstanceCore IAM policy on the instance role and ssm:StartSession permission for the user. Option A requires open port 22. Option C explicitly states port 22 must be open. Option D requires open port 22 on the SG.",
+    "sourceUrl": "https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html",
+    "tags": ["ssm", "session-manager", "bastion", "security-group"]
+  },
+  {
+    "id": "d1-1-2-q04",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's application is experiencing volumetric DDoS attacks. Their budget allows for an additional $3,000 per month in security spending, and they need a dedicated DDoS Response Team available 24/7 during attacks. Which AWS service should they enable?",
+    "options": [
+      { "id": "A", "text": "AWS Shield Standard" },
+      { "id": "B", "text": "AWS WAF with rate-based rules" },
+      { "id": "C", "text": "AWS Shield Advanced" },
+      { "id": "D", "text": "AWS Firewall Manager" }
+    ],
+    "correct": ["C"],
+    "rationale": "Shield Advanced ($3,000/month) provides enhanced DDoS protection at Layers 3, 4, and 7, real-time attack visibility, cost protection for scaling during attacks, and access to the AWS DDoS Response Team (DRT) 24/7. Shield Standard is free but does not include DRT or Layer 7 protection. WAF rate-based rules can help with application-layer floods but not volumetric network-level DDoS. Firewall Manager is for centrally managing security policies, not DDoS response.",
+    "sourceUrl": "https://docs.aws.amazon.com/waf/latest/developerguide/ddos-responding.html",
+    "tags": ["shield", "ddos", "shield-advanced", "drt"]
+  },
+  {
+    "id": "d1-1-2-q05",
+    "objective": "1.2 — Design Secure Workloads and Applications",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company wants to block all inbound traffic from a specific country at the network edge before it reaches their ALB. Which solution accomplishes this with the LEAST operational overhead?",
+    "options": [
+      { "id": "A", "text": "Add deny rules in the VPC Network ACL for each IP range assigned to that country." },
+      { "id": "B", "text": "Configure a geo-match rule in AWS WAF and associate the Web ACL with the ALB." },
+      { "id": "C", "text": "Configure AWS Shield Advanced geo-blocking rules." },
+      { "id": "D", "text": "Use VPC Flow Logs to identify traffic from the country and manually update security groups." }
+    ],
+    "correct": ["B"],
+    "rationale": "AWS WAF supports geo-match conditions that block or allow requests based on the country of origin. Associating the Web ACL with the ALB is a single configuration step. Option A would require maintaining hundreds or thousands of NACL rules for all IP ranges in a country and NACLs have a limit of 20 rules per NACL by default. Shield Advanced does not offer geo-blocking. Option D is manual, reactive, and not scalable.",
+    "sourceUrl": "https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-geo-match.html",
+    "tags": ["waf", "geo-blocking", "alb", "nacl"]
+  }
+]
+*/}

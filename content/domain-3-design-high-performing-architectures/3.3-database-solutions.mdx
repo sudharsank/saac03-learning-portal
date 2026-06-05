@@ -5,6 +5,390 @@ domain: 3
 weight: "Medium"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 3.3 — High-Performing Database Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Database performance on AWS is not a single dial — it is a matrix of choices across engine, storage, replication topology, caching layer, and sharding strategy. A relational workload with complex joins and ACID transactions calls for Amazon RDS or Aurora. A sub-millisecond key-value access pattern calls for DynamoDB. An analytical workload over petabytes of columnar data calls for Amazon Redshift. Layering caching with ElastiCache in front of any database can reduce read latency from milliseconds to microseconds and dramatically reduce database load during traffic spikes.
+
+AWS purpose-built databases eliminate the operational overhead of running database software on EC2 while offering performance characteristics tuned specifically for their access patterns. Aurora, for example, decouples storage from compute: the cluster volume is shared across all nodes and auto-grows in 10 GB increments up to 128 TB, with six-way replication across three AZs built into the storage layer — replication happens at the storage level, not the SQL layer, making Aurora Replicas far faster and more consistent than RDS Read Replicas.
+
+DynamoDB's design philosophy is partition-based horizontal scaling. Every table is partitioned by a **partition key** (hash key). Choosing a high-cardinality, evenly distributed partition key is the most important design decision — a "hot partition" where most traffic lands on a single key will throttle requests even when other partitions are idle. Understanding how Write Capacity Units (WCUs) and Read Capacity Units (RCUs) are consumed, and how DAX caching and DynamoDB Streams complement the core service, is essential for exam scenarios.
+
+## Key Components
+
+- **Amazon RDS** — Managed relational DB: MySQL, PostgreSQL, MariaDB, Oracle, SQL Server, Db2; Multi-AZ, Read Replicas
+- **Amazon Aurora** — MySQL/PostgreSQL-compatible; cluster storage, Aurora Replicas, Serverless v1/v2, Global Database
+- **Amazon DynamoDB** — Serverless key-value/document store; single-digit millisecond at any scale
+- **Amazon DAX** — DynamoDB Accelerator: in-memory write-through cache, microsecond reads
+- **Amazon ElastiCache** — Managed Redis and Memcached; sub-millisecond caching layer
+- **Amazon Redshift** — Columnar MPP data warehouse; RA3 nodes, Redshift Spectrum, Concurrency Scaling
+- **Amazon Neptune** — Managed graph database; property graph (Gremlin) and RDF (SPARQL)
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Amazon RDS — Managed Relational Database
+
+RDS automates patching, backups (automated snapshots retained 0–35 days), and failover. Storage options: **gp3** (default, configurable IOPS/throughput), **io1** (Provisioned IOPS, high I/O), **magnetic** (legacy).
+
+**Multi-AZ Deployment**: Creates a synchronous standby replica in a different AZ. If the primary fails, RDS automatically promotes the standby — DNS CNAME flips to the new primary, typically within 60–120 seconds. **Multi-AZ is for high availability (HA), not read scaling** — the standby is not accessible for reads.
+
+**Read Replicas**: Asynchronous replication from the primary to up to 5 read replicas. Replicas are readable and reduce read load on the primary. Replicas can be in the **same region or a different region** (cross-region Read Replicas). They use the engine's native replication (binlog for MySQL/MariaDB, streaming replication for PostgreSQL). If the primary fails, a Read Replica must be **manually promoted** — it is not automatic like Multi-AZ. Read Replicas can be promoted to standalone DB instances.
+
+**Parameter Groups**: Collections of engine configuration parameters. Custom parameter groups allow tuning of buffer pool size, query cache, max connections, etc. Dynamic parameters apply immediately; static parameters require a reboot.
+
+### Amazon Aurora
+
+Aurora's architecture fundamentally differs from RDS: compute (DB instances) is separated from storage (cluster volume).
+
+**Cluster Architecture:**
+- **Cluster Volume**: A single shared, distributed storage volume across all instances in the cluster, replicated 6 ways across 3 AZs, auto-grows in 10 GB increments to 128 TB.
+- **Primary Instance**: Handles all writes and reads. One per cluster.
+- **Aurora Replicas**: Up to 15 read-only replicas sharing the same cluster volume — no replication lag for storage (replication is at the storage layer). Replica lag is typically under 10 ms. Can be promoted to primary automatically on primary failure.
+- **Endpoints**: Cluster endpoint (writer), Reader endpoint (load-balances across all replicas), Custom endpoint (subset of instances), Instance endpoints.
+
+**Aurora Serverless v2**: Instantly scales capacity in fine-grained increments (0.5 ACU = Aurora Capacity Unit) from minimum to maximum based on demand. Scales in under a second — suitable for variable, unpredictable, or intermittent workloads. v2 supports all Aurora features including Global Database and Multi-AZ. (v1 scales in coarser increments with a brief pause during scaling — largely superseded by v2.)
+
+**Aurora Global Database**: One primary AWS Region with up to 5 secondary read-only regions. Uses dedicated infrastructure for cross-region replication — typically under 1 second lag. Enables low-latency local reads globally and disaster recovery with RPO < 1 minute and RTO < 1 minute (fast failover to a secondary region with promotion). **Not** the same as cross-region Read Replicas — replication is at the storage layer.
+
+**Aurora Parallel Query**: Pushes down query processing to the Aurora storage layer. SQL queries scan data in the storage nodes in parallel rather than pulling all data to the head node. Reduces head node CPU/IO, enabling analytical queries to run alongside OLTP workloads without impacting throughput.
+
+**Aurora Backtrack**: Rewinds the Aurora DB cluster to a specific point in time **without restoring from a backup**. Operates in seconds to minutes. Only available for Aurora MySQL. Maximum backtrack window: 72 hours. Useful for recovering from accidental data changes (DROP TABLE, accidental DELETE).
+
+### Amazon DynamoDB
+
+DynamoDB is a fully managed, serverless, key-value and document database that delivers single-digit millisecond latency at any scale.
+
+**Data Model:**
+- **Partition Key** (Hash Key): Determines which partition stores the item. Must be unique per item (in a table with only a partition key). Choose high-cardinality keys (e.g., user_id, order_id) to distribute load evenly.
+- **Sort Key** (Range Key): Optional second key component. Enables range queries within a partition (e.g., all orders for user_id = 123 sorted by timestamp).
+- **GSI (Global Secondary Index)**: Index on any attribute with its own partition key + optional sort key. Maintains a separate projection of data — supports alternative query patterns. Up to 20 GSIs per table. Eventually consistent by default.
+- **LSI (Local Secondary Index)**: Same partition key as the base table but a different sort key. Must be created at table creation. Strongly consistent reads available. Up to 5 LSIs per table.
+
+**Capacity Modes:**
+- **Provisioned**: Set WCU (Write Capacity Units) and RCU (Read Capacity Units). Auto Scaling can adjust these. More predictable cost for steady workloads.
+- **On-Demand**: DynamoDB scales capacity instantly with no capacity planning. Billed per request. 2-5x more expensive per request than provisioned. Best for unknown, unpredictable, or spiky traffic patterns.
+
+**Capacity Unit Math (critical for exam):**
+- 1 WCU = 1 KB write per second (strongly consistent)
+- 1 RCU = 4 KB **strongly consistent** read per second
+- 1 RCU = **two** 4 KB **eventually consistent** reads per second (0.5 RCU per eventually consistent read)
+- Transactional operations consume 2x WCUs and 2x RCUs
+
+**DynamoDB Streams**: Ordered stream of item-level changes (INSERT, UPDATE, DELETE). Records stored for 24 hours. Use with Lambda for change data capture (CDC), cross-region replication, audit logs, real-time analytics triggers.
+
+**DynamoDB TTL**: Automatically deletes expired items at no cost. Set an attribute as the TTL attribute (epoch timestamp). DynamoDB scans for and deletes expired items within 48 hours. Deleted items appear in Streams with a `userIdentity` of `dynamodb.amazonaws.com`.
+
+**DAX (DynamoDB Accelerator)**: In-memory write-through cache for DynamoDB. Delivers microsecond read latency (vs. single-digit millisecond for DynamoDB). DAX is a cluster of cache nodes. **Write-through**: writes go to DynamoDB, then DAX cache is updated. DAX does **NOT** cache Scan operations or **strongly consistent reads** — those bypass DAX and go directly to DynamoDB. DAX sits in your VPC and requires no application code changes (uses same DynamoDB API, different endpoint).
+
+### Amazon ElastiCache
+
+**ElastiCache Redis:**
+- Supports complex data structures: strings, lists, sets, sorted sets, hashes, bitmaps, pub/sub messaging
+- **Persistence**: AOF (Append Only File) and RDB snapshots — data survives restarts
+- **Replication**: Supports primary-replica replication with automatic failover (Multi-AZ)
+- **Cluster Mode Disabled**: Single shard with one primary + up to 5 read replicas. Max 6.5 TB per node. Scales vertically (change node type).
+- **Cluster Mode Enabled**: Data sharded across up to 500 shards. Each shard has one primary + replicas. Horizontally scalable. Required when data exceeds single-node capacity or when you need online resharding.
+
+**ElastiCache Memcached:**
+- Multi-threaded: efficiently uses multiple CPU cores per node
+- No persistence: cache only — data lost on restart/failure
+- No replication: no failover capability
+- Horizontal scaling by adding/removing nodes (simple sharding)
+- Use when you need: maximum throughput per node for simple object caching with no persistence requirement
+
+**Redis vs Memcached Selection:**
+
+| Feature | Redis | Memcached |
+|---------|-------|-----------|
+| Data persistence | Yes (AOF/RDB) | No |
+| Replication / HA | Yes | No |
+| Complex data types | Yes | No |
+| Pub/Sub | Yes | No |
+| Sorted sets (leaderboards) | Yes | No |
+| Horizontal sharding | Yes (cluster mode) | Yes |
+| Multi-threaded | No (single-threaded) | Yes |
+| Use for | HA cache, sessions, leaderboards | Simple high-throughput object cache |
+
+### Amazon Redshift
+
+Redshift is a petabyte-scale columnar MPP (Massively Parallel Processing) data warehouse. Data is stored column-by-column rather than row-by-row, enabling extremely efficient compression and aggregate queries.
+
+**Distribution Styles** (how data is distributed across slices/nodes):
+- **KEY**: Rows with the same value for the distribution column are co-located on the same slice. Minimizes data movement for joins on the distribution key.
+- **EVEN**: Rows distributed in round-robin across all slices. Default for tables with no clear distribution key or not frequently joined.
+- **ALL**: Full copy of the table on every node. Best for small dimension tables that are frequently joined with large fact tables.
+- **AUTO**: Redshift automatically selects the best strategy based on table size.
+
+**Sort Keys**: Define the physical order of rows on disk. Range scans skip blocks that do not match WHERE clause. **Compound sort key**: most selective in first column, efficient for ORDER BY and range queries. **Interleaved sort key**: equal weight to all sort key columns — good for multiple query patterns on the same table.
+
+**RA3 Nodes**: Separate compute and storage (powered by Redshift Managed Storage backed by S3). Scale compute and storage independently. Enables Redshift to grow to petabyte scale without over-provisioning compute.
+
+**Redshift Spectrum**: Query data directly in S3 without loading it into Redshift. Uses Spectrum nodes (not your cluster nodes) to push down query processing to S3 data. Can join S3 external tables with Redshift internal tables. Requires an external schema mapped to AWS Glue/Hive Metastore.
+
+**Concurrency Scaling**: Automatically adds transient cluster capacity during bursts of concurrent queries. Queries route to the concurrency scaling cluster transparently. Users get consistent performance even during peaks.
+
+## Decision Flow
+
+```
+Workload type?
+  Relational (SQL, ACID, complex joins) → RDS or Aurora
+    Need HA automatic failover → Multi-AZ (both RDS and Aurora)
+    Need read scaling → Read Replicas (async) or Aurora Replicas (near-sync)
+    Variable/unpredictable load → Aurora Serverless v2
+    Global reads, low latency → Aurora Global Database
+    Analytical + OLTP mixed → Aurora Parallel Query
+
+  Key-value / document at scale → DynamoDB
+    Read-heavy, caching needed → DynamoDB + DAX
+    Unknown access patterns → On-demand capacity mode
+    Predictable steady traffic → Provisioned capacity mode
+    Eventual consistency acceptable → Save RCUs with eventual reads
+
+  Analytics / data warehouse → Redshift
+    Query S3 data lake → Redshift Spectrum
+    Large dimension table joins → ALL distribution
+    Large fact table joins → KEY distribution
+
+  General caching → ElastiCache
+    Need persistence, pub/sub, sorted sets → Redis
+    Need maximum multi-threaded throughput → Memcached
+
+  Graph relationships → Neptune
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create an Aurora MySQL Cluster with a Reader Endpoint
+
+```bash
+# Create Aurora DB subnet group
+aws rds create-db-subnet-group \
+  --db-subnet-group-name my-aurora-subnets \
+  --db-subnet-group-description "Aurora subnets" \
+  --subnet-ids subnet-0aa1 subnet-0bb2 subnet-0cc3
+
+# Create the Aurora cluster
+aws rds create-db-cluster \
+  --db-cluster-identifier my-aurora-cluster \
+  --engine aurora-mysql \
+  --engine-version 8.0.mysql_aurora.3.04.0 \
+  --master-username admin \
+  --master-user-password MySecurePass123! \
+  --db-subnet-group-name my-aurora-subnets \
+  --vpc-security-group-ids sg-0abc123 \
+  --backup-retention-period 7 \
+  --storage-encrypted
+
+# Add primary instance
+aws rds create-db-instance \
+  --db-instance-identifier my-aurora-primary \
+  --db-cluster-identifier my-aurora-cluster \
+  --db-instance-class db.r7g.large \
+  --engine aurora-mysql
+
+# Add a read replica
+aws rds create-db-instance \
+  --db-instance-identifier my-aurora-replica-1 \
+  --db-cluster-identifier my-aurora-cluster \
+  --db-instance-class db.r7g.large \
+  --engine aurora-mysql
+```
+
+### DynamoDB Table with GSI and On-Demand Mode
+
+```bash
+# Create a DynamoDB table with GSI
+aws dynamodb create-table \
+  --table-name Orders \
+  --attribute-definitions \
+    AttributeName=OrderId,AttributeType=S \
+    AttributeName=CustomerId,AttributeType=S \
+    AttributeName=OrderDate,AttributeType=S \
+  --key-schema \
+    AttributeName=OrderId,KeyType=HASH \
+  --global-secondary-indexes '[
+    {
+      "IndexName": "CustomerOrdersIndex",
+      "KeySchema": [
+        {"AttributeName": "CustomerId", "KeyType": "HASH"},
+        {"AttributeName": "OrderDate", "KeyType": "RANGE"}
+      ],
+      "Projection": {"ProjectionType": "ALL"}
+    }
+  ]' \
+  --billing-mode PAY_PER_REQUEST
+
+# Enable TTL on an attribute
+aws dynamodb update-time-to-live \
+  --table-name Orders \
+  --time-to-live-specification Enabled=true,AttributeName=ExpiresAt
+
+# Enable DynamoDB Streams
+aws dynamodb update-table \
+  --table-name Orders \
+  --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES
+```
+
+### Create a DAX Cluster
+
+```bash
+# Create a DAX subnet group
+aws dax create-subnet-group \
+  --subnet-group-name my-dax-subnets \
+  --subnet-ids subnet-0aa1 subnet-0bb2
+
+# Create DAX cluster (3-node)
+aws dax create-cluster \
+  --cluster-name my-dax-cluster \
+  --node-type dax.r5.large \
+  --replication-factor 3 \
+  --iam-role-arn arn:aws:iam::123456789:role/DAXRole \
+  --subnet-group-name my-dax-subnets \
+  --security-group-ids sg-0dax123
+```
+
+### Create ElastiCache Redis Cluster Mode Enabled
+
+```bash
+# Create ElastiCache Redis replication group with cluster mode
+aws elasticache create-replication-group \
+  --replication-group-id my-redis-cluster \
+  --replication-group-description "Redis Cluster Mode" \
+  --num-node-groups 3 \
+  --replicas-per-node-group 2 \
+  --cache-node-type cache.r7g.large \
+  --engine redis \
+  --engine-version 7.0 \
+  --cache-subnet-group-name my-redis-subnets \
+  --security-group-ids sg-0redis123 \
+  --automatic-failover-enabled \
+  --multi-az-enabled \
+  --at-rest-encryption-enabled \
+  --transit-encryption-enabled
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **RDS Multi-AZ vs Read Replicas**: Multi-AZ = synchronous standby for HA, not readable. Read Replicas = asynchronous, readable, must be manually promoted. A question about reducing read load → Read Replicas. A question about automatic failover → Multi-AZ.
+- **DynamoDB capacity math**: 1 WCU = 1 KB write/s. 1 RCU = 4 KB strongly consistent read/s, but only 0.5 RCU per eventually consistent read. A 10 KB item needs 10 WCUs to write and 3 RCUs for a strongly consistent read (ceil(10/4) = 3). Exam questions often ask you to calculate required capacity.
+- **DAX limitations**: DAX does NOT cache strongly consistent reads or Scan operations. Those bypass DAX and go directly to DynamoDB. Exam scenarios testing DAX understanding often include strongly consistent read requirements as a distractor.
+- **Aurora vs RDS architecture difference**: Aurora stores data in a shared cluster volume with 6-way replication built into the storage layer. Aurora Replicas share this storage and have near-zero replica lag. RDS Read Replicas use asynchronous engine-level replication and can lag significantly under heavy write load.
+- **ElastiCache Redis cluster mode**: When enabled, data is sharded across multiple shards — supports horizontal scaling beyond what a single node can hold. When disabled, single shard with one primary + up to 5 read replicas — scales vertically only.
+
+## Common Traps
+
+- **Aurora backtrack vs point-in-time restore**: Backtrack rewinds the live cluster in place (seconds to minutes, up to 72-hour window, Aurora MySQL only). Point-in-time restore creates a NEW DB cluster from a backup (takes longer). If a question asks for the fastest way to undo an accidental DROP TABLE in Aurora → Backtrack.
+- **DAX is write-through, not write-around**: Writes go to DynamoDB, then DAX updates its cache. DAX does not serve as a write buffer — it does not improve write performance, only read performance. Applications that are write-heavy gain no benefit from DAX.
+- **Redshift distribution ALL is for small tables only**: ALL copies every row of a table to every compute node. For a large fact table, this would consume enormous storage on every node. Use ALL only for small dimension tables (reference data, lookups) that are frequently joined with large fact tables.
+</ExamAngle>
+
+<Flashcard front="What is the difference between RDS Multi-AZ and Read Replicas?" back="Multi-AZ: synchronous standby in another AZ for automatic HA failover — NOT readable. Read Replicas: asynchronous replication, readable, must be manually promoted. Multi-AZ = HA; Read Replicas = read scaling." />
+<Flashcard front="How many WCUs and RCUs are consumed by writing a 5 KB item and reading it with strong consistency?" back="Write: ceil(5/1) = 5 WCUs. Strongly consistent read: ceil(5/4) = 2 RCUs. Eventually consistent read: ceil(5/4) / 2 = 1 RCU." />
+<Flashcard front="What does DAX NOT cache?" back="DAX does not cache strongly consistent reads or Scan operations. Those requests bypass DAX and go directly to DynamoDB." />
+<Flashcard front="What is Aurora Backtrack?" back="A feature that rewinds an Aurora MySQL cluster to a point in time (up to 72 hours ago) in seconds to minutes without creating a new cluster. Used to recover from accidental data changes." />
+<Flashcard front="When should you use Redshift ALL distribution style?" back="For small dimension tables that are frequently joined with large fact tables. ALL replicates the entire table to every compute node, eliminating data movement during joins. Not suitable for large tables." />
+
+{/* QUIZ
+[
+  {
+    "id": "d3-3-q01",
+    "objective": "3.3 — High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An application using Amazon RDS MySQL experiences high read load that is overwhelming the primary instance. The solution must support automatic failover if the primary fails. Which configuration should be implemented?",
+    "options": [
+      { "id": "A", "text": "Enable Multi-AZ and use the standby instance for read traffic" },
+      { "id": "B", "text": "Create up to 5 Read Replicas and configure the application to send reads to a replica endpoint" },
+      { "id": "C", "text": "Create a Multi-AZ deployment and enable read queries on the Multi-AZ standby" },
+      { "id": "D", "text": "Take automated snapshots and restore them as read instances" }
+    ],
+    "correct": ["B"],
+    "rationale": "RDS Read Replicas can serve read traffic, offloading the primary instance. Up to 5 read replicas can be created per primary. Multi-AZ standby instances are NOT accessible for reads — they exist solely as HA failover targets. Automated snapshots create restore points, not live read endpoints. Both Multi-AZ and Read Replicas should be used together for HA + read scaling.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html",
+    "tags": ["rds", "read-replicas", "multi-az", "scaling"]
+  },
+  {
+    "id": "d3-3-q02",
+    "objective": "3.3 — High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A DynamoDB table stores user session data. Each session item is 2 KB. The application performs 500 strongly consistent reads per second and 200 writes per second. How many RCUs and WCUs are required?",
+    "options": [
+      { "id": "A", "text": "250 RCUs and 200 WCUs" },
+      { "id": "B", "text": "500 RCUs and 400 WCUs" },
+      { "id": "C", "text": "125 RCUs and 200 WCUs" },
+      { "id": "D", "text": "500 RCUs and 200 WCUs" }
+    ],
+    "correct": ["D"],
+    "rationale": "For strongly consistent reads: 1 RCU = 4 KB/s. A 2 KB item requires ceil(2/4) = 1 RCU per read. 500 reads/s × 1 RCU = 500 RCUs. For writes: 1 WCU = 1 KB/s. A 2 KB item requires ceil(2/1) = 2 WCUs per write. 200 writes/s × 2 WCU = 400 WCUs. Therefore 500 RCUs and 400 WCUs.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html",
+    "tags": ["dynamodb", "rcu", "wcu", "capacity-calculation"]
+  },
+  {
+    "id": "d3-3-q03",
+    "objective": "3.3 — High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A DynamoDB-backed application has very high read throughput requirements. After adding DAX, a developer notices that some reads are still hitting DynamoDB with full latency. What is the most likely reason?",
+    "options": [
+      { "id": "A", "text": "DAX has not been configured with enough nodes to handle the read volume" },
+      { "id": "B", "text": "The application is using strongly consistent reads, which bypass DAX" },
+      { "id": "C", "text": "DAX only caches reads for tables with provisioned capacity mode" },
+      { "id": "D", "text": "The application is using the wrong DynamoDB SDK version" }
+    ],
+    "correct": ["B"],
+    "rationale": "DAX does not cache strongly consistent reads — those requests bypass the DAX cluster and are sent directly to DynamoDB. DAX caches eventually consistent reads and GetItem/Query/BatchGetItem responses. If an application uses strongly consistent reads, DAX provides no read latency benefit for those operations.",
+    "sourceUrl": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DAX.consistency.html",
+    "tags": ["dynamodb", "dax", "consistent-reads", "caching"]
+  },
+  {
+    "id": "d3-3-q04",
+    "objective": "3.3 — High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company needs a caching solution for a leaderboard feature that requires real-time sorted rankings, pub/sub for live updates, and persistence so the cache survives restarts. Which caching engine should be used?",
+    "options": [
+      { "id": "A", "text": "ElastiCache Memcached" },
+      { "id": "B", "text": "ElastiCache Redis" },
+      { "id": "C", "text": "DynamoDB DAX" },
+      { "id": "D", "text": "Amazon CloudFront" }
+    ],
+    "correct": ["B"],
+    "rationale": "ElastiCache Redis supports sorted sets (perfect for leaderboards), pub/sub messaging for live updates, and persistence via AOF/RDB snapshots. Memcached has no persistence, no pub/sub, and no complex data types. DAX is specific to DynamoDB acceleration. CloudFront is a CDN, not a caching database layer.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html",
+    "tags": ["elasticache", "redis", "sorted-sets", "pub-sub", "persistence"]
+  },
+  {
+    "id": "d3-3-q05",
+    "objective": "3.3 — High-Performing Database Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "An Aurora MySQL cluster accidentally had a critical table dropped 20 minutes ago. The team needs to recover the data as quickly as possible without creating a new DB cluster. Which feature should be used?",
+    "options": [
+      { "id": "A", "text": "Restore the cluster from the most recent automated snapshot" },
+      { "id": "B", "text": "Use Aurora point-in-time recovery to restore to 19 minutes ago" },
+      { "id": "C", "text": "Use Aurora Backtrack to rewind the cluster to before the DROP TABLE" },
+      { "id": "D", "text": "Promote an Aurora Replica to become the new primary and restore from its binlog" }
+    ],
+    "correct": ["C"],
+    "rationale": "Aurora Backtrack rewinds the live cluster in place to a specific point in time (up to 72 hours ago) within seconds to minutes — no new cluster is created. Point-in-time recovery and snapshot restores create a NEW DB cluster, which requires updating application connection strings, takes longer, and involves more operational steps. Aurora Replicas share the same cluster storage so they also had the table dropped.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Managing.Backtrack.html",
+    "tags": ["aurora", "backtrack", "recovery", "mysql"]
+  }
+]
+*/}

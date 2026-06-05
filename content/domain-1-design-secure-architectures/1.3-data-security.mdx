@@ -5,6 +5,481 @@ domain: 1
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 1.3 — Determine Appropriate Data Security Controls
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Data security controls ensure that data is protected both **at rest** (stored on disk) and **in transit** (moving over a network), and that access to cryptographic keys and secrets is tightly controlled and audited. AWS provides multiple layers of data protection: server-side encryption built into storage services, a centralized key management service (KMS), a secrets rotation engine (Secrets Manager), and compliance-oriented controls like S3 Object Lock.
+
+The guiding principle is **encryption by default**: modern AWS architectures encrypt all data at rest and in transit, with encryption keys managed in AWS KMS rather than on instances or in application code. This ensures that even if physical media is stolen or an account is partially compromised, data remains unreadable without the correct key — and every key access is logged.
+
+Beyond encryption, data security includes protecting the **integrity** and **availability** of data: preventing accidental or malicious deletion (S3 Object Lock, versioning), automatically discovering sensitive data (Amazon Macie), and ensuring credentials are never hardcoded in applications (Secrets Manager, Parameter Store).
+
+## Key Components
+
+- **AWS KMS (Key Management Service)** — Managed service for creating and controlling cryptographic keys (CMKs). Integrates with most AWS services. All key usage is logged to CloudTrail.
+- **Customer Managed Keys (CMKs)** — KMS keys you create, own, and manage. You control the key policy, rotation schedule, and can disable/delete them.
+- **AWS Managed Keys** — Created by AWS services on your behalf (e.g., `aws/s3`, `aws/rds`). You cannot manage the key policy directly. Rotate automatically every year.
+- **Envelope Encryption** — AWS KMS pattern: data is encrypted with a **data key** (symmetric AES-256), the data key is encrypted with a **CMK**, and the encrypted data key is stored alongside the data. The CMK never leaves KMS.
+- **S3 Server-Side Encryption** — Three variants: SSE-S3 (AWS manages key), SSE-KMS (KMS CMK), SSE-C (customer provides key per request).
+- **AWS Secrets Manager** — Stores database passwords, API keys, and other secrets. Supports **automatic rotation** with native integration for RDS, Redshift, DocumentDB, and custom Lambda rotation functions.
+- **AWS Systems Manager Parameter Store** — Stores configuration data and secrets as parameters. `SecureString` parameters are encrypted with KMS. No automatic rotation — rotation must be managed manually or with Lambda.
+- **S3 Block Public Access** — Account-level or bucket-level settings that prevent public access via bucket policies, ACLs, or both.
+- **S3 Object Lock** — Write-Once-Read-Many (WORM) protection. Objects cannot be deleted or overwritten for a specified retention period.
+- **Amazon Macie** — ML-powered service that discovers and classifies sensitive data (PII, financial data, credentials) in S3 buckets.
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### S3 Server-Side Encryption Comparison
+
+| Type | Key Management | Who Provides Key | CloudTrail Log | Use Case |
+|---|---|---|---|---|
+| **SSE-S3** | AWS manages key entirely | AWS | No (S3 internal) | Default encryption, minimal admin overhead |
+| **SSE-KMS** | KMS CMK (AWS managed or customer managed) | AWS KMS | **Yes — every object access logged** | Compliance, audit requirements, access control at key level |
+| **SSE-C** | Customer manages key, provided per request | Customer (in request header) | No | Customer wants key material never stored in AWS |
+| **Client-side** | Customer manages entirely | Customer (before upload) | No | Data must be encrypted before leaving the corporate network |
+
+**SSE-KMS is the standard choice for compliance workloads** because:
+1. CloudTrail records every `GenerateDataKey` and `Decrypt` call against the CMK, providing a full audit trail of who accessed which data.
+2. Key policies can restrict which principals can use the key to encrypt/decrypt.
+3. You can revoke access to data by disabling the CMK (all encrypted data becomes inaccessible).
+
+### Envelope Encryption Deep Dive
+
+AWS KMS never encrypts large data directly. Instead:
+
+1. Your application (or an AWS service) calls `kms:GenerateDataKey(CMK_ARN)`.
+2. KMS returns two things:
+   - A **plaintext data key** (used to encrypt your data with AES-256 locally).
+   - An **encrypted data key** (data key encrypted under the CMK, safe to store).
+3. Your application encrypts the data with the plaintext data key, then **immediately discards** the plaintext data key from memory.
+4. The encrypted data key is stored alongside the encrypted data (e.g., in S3 object metadata).
+5. To decrypt: retrieve the encrypted data key → call `kms:Decrypt` → KMS returns the plaintext data key → decrypt the data locally.
+
+**The CMK never leaves KMS**. All `kms:Decrypt` and `kms:GenerateDataKey` calls are recorded in CloudTrail.
+
+### AWS Secrets Manager vs. Parameter Store
+
+| Feature | Secrets Manager | Parameter Store |
+|---|---|---|
+| Primary use | Passwords, API keys, OAuth tokens | Configuration values, feature flags, secrets |
+| Automatic rotation | **Yes** — built-in for RDS/Aurora/Redshift/DocumentDB; Lambda-based for others | **No** — manual rotation (you manage Lambda if needed) |
+| Cost | $0.40/secret/month + $0.05/10,000 API calls | Free for standard parameters; $0.05/10k for advanced |
+| Versioning | Yes — maintains previous versions during rotation | Yes |
+| Audit | CloudTrail | CloudTrail |
+| Max secret size | 65,536 bytes | 8 KB (standard), 8 KB (advanced) |
+| Cross-account | Yes | Limited |
+| Best for | Database credentials (auto-rotation), OAuth tokens | App config, non-rotating secrets, hierarchical config (`/app/prod/db-url`) |
+
+**Decision rule**: If the question mentions automatic credential rotation for RDS → Secrets Manager. If it mentions configuration values or asks for the cheapest option → Parameter Store.
+
+### S3 Block Public Access (4 Settings)
+
+| Setting | What it Blocks |
+|---|---|
+| `BlockPublicAcls` | Rejects PUT requests that include a public ACL; ignores existing public ACLs |
+| `IgnorePublicAcls` | Ignores all public ACLs on buckets and objects (ACLs still exist but have no effect) |
+| `BlockPublicPolicy` | Rejects bucket policies that grant public access |
+| `RestrictPublicBuckets` | Restricts access to buckets with public policies to only AWS services and authorized users in the account |
+
+All four settings can be set at the **account level** (affects all buckets) or **bucket level**. When enabled at the account level, individual bucket owners cannot override them. The exam typically expects all four set to `true` for compliance.
+
+### S3 Object Lock
+
+Object Lock prevents objects from being deleted or overwritten for a fixed period or indefinitely. It must be enabled at bucket creation time (cannot be added to an existing bucket without calling AWS Support).
+
+**Two retention modes:**
+
+| Mode | Who Can Override/Delete | Use Case |
+|---|---|---|
+| **Governance** | Users with `s3:BypassGovernanceRetention` permission | Internal audit, testing WORM policies, allows privileged users to remove lock |
+| **Compliance** | **No one** — not even the root account | SEC 17a-4, HIPAA, legal hold — absolute WORM protection |
+
+**Legal Hold** — An independent lock that prevents deletion regardless of retention dates. Has no fixed duration. Controlled by `s3:PutObjectLegalHold` permission.
+
+**Retention period** — Can be set per object or via a default bucket retention policy. Each object version has its own retention settings.
+
+### EBS Encryption
+
+- EBS volumes can be encrypted at creation using a KMS CMK.
+- Encryption is transparent to the OS — the EBS driver handles encryption/decryption.
+- **You cannot directly encrypt an existing unencrypted EBS volume.** The only way is:
+  1. Create a snapshot of the unencrypted volume.
+  2. Copy the snapshot with encryption enabled (specify CMK).
+  3. Create a new volume from the encrypted snapshot.
+  4. Stop the instance, detach the old volume, attach the new encrypted volume.
+- Root volumes can be encrypted by specifying encryption in the launch template or AMI creation.
+
+### Amazon Macie
+
+- Uses machine learning to automatically discover and classify sensitive data in S3.
+- Identifies PII (names, SSNs, credit card numbers, passport numbers), credentials (access keys, private keys), and other sensitive data types.
+- Generates **findings** with severity ratings. Integrates with EventBridge for automated remediation.
+- Macie scans S3 object content — it is NOT a real-time access control tool. It is a **discovery and classification** tool.
+- Can be centrally managed through AWS Organizations (delegated administrator model).
+
+## Decision Flow
+
+| Data Security Requirement | Solution |
+|---|---|
+| Encrypt S3 objects, need full audit trail of every access | SSE-KMS with customer-managed CMK + CloudTrail |
+| Encrypt S3 objects, minimal overhead, no audit needed | SSE-S3 (default AES-256, AWS manages key) |
+| Customer must supply their own key material per request | SSE-C |
+| Database password stored securely with automatic rotation every 30 days | AWS Secrets Manager |
+| Application configuration values with hierarchy, no rotation | Parameter Store (free tier) |
+| Prevent S3 objects from being deleted for 7 years for compliance | S3 Object Lock, Compliance mode, 7-year retention period |
+| Discover which S3 buckets contain PII | Amazon Macie |
+| Audit who decrypted a specific S3 object | CloudTrail (look for `kms:Decrypt` events for the CMK) |
+| Encrypt existing unencrypted EBS volume | Snapshot → copy with encryption → restore to new volume |
+| Ensure no S3 bucket can be made public, account-wide | Enable S3 Block Public Access at the account level (all 4 settings) |
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Exercise 1 — Create a KMS CMK and Use Envelope Encryption
+
+```bash
+# 1. Create a symmetric CMK
+KEY_ID=$(aws kms create-key \
+  --description "Demo CMK for S3 encryption" \
+  --key-usage ENCRYPT_DECRYPT \
+  --query 'KeyMetadata.KeyId' --output text)
+
+# Create a human-friendly alias
+aws kms create-alias \
+  --alias-name alias/demo-s3-key \
+  --target-key-id $KEY_ID
+
+echo "CMK Key ID: $KEY_ID"
+
+# 2. Enable automatic annual rotation
+aws kms enable-key-rotation --key-id $KEY_ID
+
+# 3. Generate a data key (envelope encryption demo)
+aws kms generate-data-key \
+  --key-id $KEY_ID \
+  --key-spec AES_256 \
+  --query '{PlaintextKey:Plaintext, EncryptedKey:CiphertextBlob}' \
+  --output json
+# In a real app: use Plaintext key to encrypt data, store EncryptedKey with data, discard Plaintext
+
+# 4. View the key policy
+aws kms get-key-policy --key-id $KEY_ID --policy-name default
+
+# 5. Check CloudTrail for KMS API calls
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=GenerateDataKey \
+  --max-results 5
+```
+
+### Exercise 2 — Create an S3 Bucket with SSE-KMS Default Encryption
+
+```bash
+BUCKET_NAME="secure-demo-bucket-$(date +%s)"
+
+# 1. Create the bucket
+aws s3api create-bucket \
+  --bucket $BUCKET_NAME \
+  --region us-east-1
+
+# 2. Enable SSE-KMS as the default encryption
+aws s3api put-bucket-encryption \
+  --bucket $BUCKET_NAME \
+  --server-side-encryption-configuration '{
+    "Rules": [{
+      "ApplyServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "aws:kms",
+        "KMSMasterKeyID": "alias/demo-s3-key"
+      },
+      "BucketKeyEnabled": true
+    }]
+  }'
+
+# 3. Enable S3 Block Public Access (all 4 settings)
+aws s3api put-public-access-block \
+  --bucket $BUCKET_NAME \
+  --public-access-block-configuration '{
+    "BlockPublicAcls": true,
+    "IgnorePublicAcls": true,
+    "BlockPublicPolicy": true,
+    "RestrictPublicBuckets": true
+  }'
+
+# 4. Verify encryption is applied to new objects
+aws s3 cp /etc/hostname s3://$BUCKET_NAME/test.txt
+aws s3api head-object --bucket $BUCKET_NAME --key test.txt \
+  --query '{Encryption:ServerSideEncryption, KMSKey:SSEKMSKeyId}'
+```
+
+### Exercise 3 — Enable S3 Object Lock (WORM)
+
+```bash
+# NOTE: Object Lock must be enabled at bucket creation — cannot be added later
+WORM_BUCKET="worm-demo-bucket-$(date +%s)"
+
+# 1. Create bucket with Object Lock enabled
+aws s3api create-bucket \
+  --bucket $WORM_BUCKET \
+  --region us-east-1 \
+  --object-lock-enabled-for-bucket
+
+# 2. Set a default retention period (Compliance mode, 365 days)
+aws s3api put-object-lock-configuration \
+  --bucket $WORM_BUCKET \
+  --object-lock-configuration '{
+    "ObjectLockEnabled": "Enabled",
+    "Rule": {
+      "DefaultRetention": {
+        "Mode": "COMPLIANCE",
+        "Days": 365
+      }
+    }
+  }'
+
+# 3. Upload an object — it will automatically get 365-day retention
+aws s3 cp /etc/hostname s3://$WORM_BUCKET/immutable-record.txt
+
+# 4. Try to delete it — this will fail!
+aws s3 rm s3://$WORM_BUCKET/immutable-record.txt
+# Error: Object is protected by Object Lock
+
+# 5. Check the retention details on the object
+aws s3api get-object-retention \
+  --bucket $WORM_BUCKET \
+  --key immutable-record.txt
+```
+
+### Exercise 4 — Store and Rotate a Secret in Secrets Manager
+
+```bash
+# 1. Create a secret for a database password
+SECRET_ARN=$(aws secretsmanager create-secret \
+  --name prod/myapp/db-password \
+  --description "RDS MySQL password for prod app" \
+  --secret-string '{"username":"admin","password":"InitialPass123!"}' \
+  --query 'ARN' --output text)
+
+echo "Secret ARN: $SECRET_ARN"
+
+# 2. Retrieve the secret
+aws secretsmanager get-secret-value \
+  --secret-id prod/myapp/db-password \
+  --query 'SecretString' --output text
+
+# 3. Update/rotate the secret manually
+aws secretsmanager put-secret-value \
+  --secret-id prod/myapp/db-password \
+  --secret-string '{"username":"admin","password":"NewRotatedPass456!"}'
+
+# 4. List all versions (previous versions retained for ~30 days)
+aws secretsmanager list-secret-version-ids \
+  --secret-id prod/myapp/db-password
+
+# 5. Enable automatic rotation (requires RDS integration or custom Lambda)
+# For RDS automatic rotation:
+aws secretsmanager rotate-secret \
+  --secret-id prod/myapp/db-password \
+  --rotation-rules AutomaticallyAfterDays=30
+# Note: requires the Secrets Manager rotation Lambda to be configured
+
+# 6. Tag the secret for resource tracking
+aws secretsmanager tag-resource \
+  --secret-id prod/myapp/db-password \
+  --tags '[{"Key":"Environment","Value":"prod"},{"Key":"App","Value":"myapp"}]'
+```
+
+### Exercise 5 — Encrypt an Existing EBS Volume
+
+```bash
+# Scenario: /dev/xvdb is an unencrypted data volume on an EC2 instance
+# We cannot encrypt it in-place. Must use snapshot+copy+restore.
+
+# 1. Get the volume ID
+UNENCRYPTED_VOL="vol-0abc1234def56789"  # Replace with actual volume ID
+
+# 2. Create a snapshot of the unencrypted volume
+SNAPSHOT_ID=$(aws ec2 create-snapshot \
+  --volume-id $UNENCRYPTED_VOL \
+  --description "Pre-encryption snapshot" \
+  --query 'SnapshotId' --output text)
+echo "Snapshot ID: $SNAPSHOT_ID"
+# Wait for the snapshot to complete
+aws ec2 wait snapshot-completed --snapshot-ids $SNAPSHOT_ID
+
+# 3. Copy the snapshot WITH encryption
+ENCRYPTED_SNAPSHOT=$(aws ec2 copy-snapshot \
+  --source-region us-east-1 \
+  --destination-region us-east-1 \
+  --source-snapshot-id $SNAPSHOT_ID \
+  --encrypted \
+  --kms-key-id alias/demo-s3-key \
+  --description "Encrypted copy" \
+  --query 'SnapshotId' --output text)
+aws ec2 wait snapshot-completed --snapshot-ids $ENCRYPTED_SNAPSHOT
+
+# 4. Create a new encrypted volume from the encrypted snapshot
+ENCRYPTED_VOL=$(aws ec2 create-volume \
+  --snapshot-id $ENCRYPTED_SNAPSHOT \
+  --availability-zone us-east-1a \
+  --volume-type gp3 \
+  --encrypted \
+  --query 'VolumeId' --output text)
+echo "New encrypted volume: $ENCRYPTED_VOL"
+
+# 5. Stop the instance, detach old volume, attach new encrypted volume
+# aws ec2 stop-instances --instance-ids <instance-id>
+# aws ec2 detach-volume --volume-id $UNENCRYPTED_VOL
+# aws ec2 attach-volume --volume-id $ENCRYPTED_VOL --instance-id <id> --device /dev/xvdb
+```
+
+### Exercise 6 — Enable Amazon Macie
+
+```bash
+# 1. Enable Macie in the account
+aws macie2 enable-macie
+
+# 2. Create a classification job to scan a specific S3 bucket
+aws macie2 create-classification-job \
+  --job-type ONE_TIME \
+  --name "PII-scan-demo" \
+  --s3-job-definition '{
+    "bucketDefinitions": [
+      {
+        "accountId": "123456789012",
+        "buckets": ["'$BUCKET_NAME'"]
+      }
+    ]
+  }'
+
+# 3. List findings after the job completes
+aws macie2 list-findings \
+  --finding-criteria '{"criterion":{"severity.description":{"eq":["High","Medium"]}}}' \
+  --max-results 10
+
+# 4. Get details on a specific finding
+# aws macie2 get-findings --finding-ids "finding-id-here"
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **SSE-KMS provides CloudTrail audit trail** — When the exam asks about auditing who accessed specific S3 data, SSE-KMS is the answer because every `kms:GenerateDataKey` and `kms:Decrypt` call is logged to CloudTrail. SSE-S3 does not log key usage.
+- **Envelope encryption pattern** — Understand that the CMK never encrypts data directly. It encrypts the data key, and the data key encrypts the actual data. This allows encrypting large objects efficiently while keeping the CMK protected in KMS hardware.
+- **Secrets Manager auto-rotation vs. Parameter Store** — Secrets Manager natively rotates RDS/Redshift/DocumentDB credentials. Parameter Store (`SecureString`) requires you to write your own rotation logic. When the question says "auto-rotate database credentials" → Secrets Manager.
+- **S3 Object Lock Compliance mode** — In Compliance mode, **no one** can delete or modify an object before the retention period expires — not the account root, not AWS Support. This is the answer for SEC 17a-4, FINRA, or HIPAA immutability requirements. Governance mode allows privileged users to bypass with `s3:BypassGovernanceRetention`.
+- **Cannot directly encrypt an unencrypted EBS volume** — The only path is: create snapshot → copy snapshot with encryption → create new volume from encrypted snapshot. There is no in-place encryption API.
+
+## Common Traps
+
+- **Confusing SSE-KMS key types** — AWS managed keys (e.g., `aws/s3`) are created automatically by S3 and rotate yearly. You cannot change their key policy or disable them. Customer managed keys give you full control (key policy, rotation, disable, delete). The exam may ask "a customer needs to control who can decrypt S3 data using key policies" — the answer requires a customer managed CMK, not an AWS managed key.
+- **Secrets Manager vs. Parameter Store cost trap** — Secrets Manager costs $0.40/secret/month. For hundreds of non-rotating configuration parameters, Parameter Store free tier is more cost-effective. The exam may phrase it as "most cost-effective way to store 500 configuration parameters" → Parameter Store Standard (free).
+- **S3 Object Lock must be enabled at bucket creation** — Many candidates try to enable Object Lock on an existing bucket and get confused when it requires a support request or bucket recreation. Always clarify that Object Lock (and versioning, which it requires) must be configured when the bucket is first created.
+</ExamAngle>
+
+<Flashcard front="What is envelope encryption in AWS KMS?" back="Data is encrypted with a plaintext data key (AES-256). The data key is then encrypted by the CMK in KMS. The encrypted data key is stored alongside the data. To decrypt: send the encrypted data key to KMS → receive plaintext data key → decrypt data. The CMK never leaves KMS." />
+<Flashcard front="SSE-S3 vs. SSE-KMS — which provides a CloudTrail audit trail?" back="SSE-KMS — every GenerateDataKey and Decrypt call against the CMK is logged to CloudTrail, giving a full record of who accessed which data. SSE-S3 uses AWS-internal keys and does not produce key-usage events in CloudTrail." />
+<Flashcard front="What is the difference between Secrets Manager and Parameter Store SecureString?" back="Secrets Manager supports automatic credential rotation (natively for RDS, Redshift, DocumentDB; via Lambda for others) and costs $0.40/secret/month. Parameter Store SecureString stores KMS-encrypted values but has no built-in rotation — you manage rotation yourself. Parameter Store standard is free." />
+<Flashcard front="What is S3 Object Lock Compliance mode?" back="An object lock retention mode where no user — including root, S3 bucket owner, or AWS — can delete or overwrite the object before the retention period expires. Used for SEC 17a-4, FINRA, and HIPAA compliance. Cannot be changed or shortened once set." />
+<Flashcard front="How do you encrypt an existing unencrypted EBS volume?" back="You cannot encrypt a volume in-place. The process is: (1) Create a snapshot of the unencrypted volume. (2) Copy the snapshot with encryption enabled, specifying a KMS CMK. (3) Create a new EBS volume from the encrypted snapshot. (4) Replace the original volume on the instance." />
+
+{/* QUIZ
+[
+  {
+    "id": "d1-1-3-q01",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A compliance team requires an audit trail showing exactly which IAM principals accessed specific objects in an S3 bucket. Which S3 encryption option enables this capability?",
+    "options": [
+      { "id": "A", "text": "SSE-S3 (AES-256 with AWS-managed keys)" },
+      { "id": "B", "text": "SSE-C (customer-provided keys)" },
+      { "id": "C", "text": "SSE-KMS with a customer managed CMK" },
+      { "id": "D", "text": "Client-side encryption with a locally managed key" }
+    ],
+    "correct": ["C"],
+    "rationale": "SSE-KMS records every kms:GenerateDataKey and kms:Decrypt call to AWS CloudTrail, capturing the principal ARN, timestamp, and object context. This provides a complete audit trail of who decrypted which data. SSE-S3 uses AWS-internal keys with no CloudTrail key-usage events. SSE-C and client-side encryption manage keys outside of KMS and do not produce CloudTrail key-usage events.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html",
+    "tags": ["s3", "kms", "sse-kms", "cloudtrail", "audit"]
+  },
+  {
+    "id": "d1-1-3-q02",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A financial services company must ensure that compliance records stored in S3 cannot be deleted or modified for exactly 7 years, even by the AWS account root user. Which solution meets this requirement?",
+    "options": [
+      { "id": "A", "text": "Enable S3 versioning and add a bucket policy denying s3:DeleteObject." },
+      { "id": "B", "text": "Enable S3 Object Lock with Governance mode and a 7-year retention period." },
+      { "id": "C", "text": "Enable S3 Object Lock with Compliance mode and a 7-year retention period." },
+      { "id": "D", "text": "Enable S3 Object Lock with Governance mode and grant only the root user s3:BypassGovernanceRetention." }
+    ],
+    "correct": ["C"],
+    "rationale": "S3 Object Lock Compliance mode prevents deletion or modification by any user — including the root account and AWS — until the retention period expires. Governance mode allows users with s3:BypassGovernanceRetention permission to remove the lock, including root. A bucket policy can be changed by an administrator and does not provide WORM guarantees. Compliance mode is the required choice for SEC 17a-4 and similar regulatory requirements.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html",
+    "tags": ["s3", "object-lock", "compliance-mode", "worm", "retention"]
+  },
+  {
+    "id": "d1-1-3-q03",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An application needs to store an RDS database password securely. The security policy requires the password to be automatically rotated every 30 days. Which service should be used?",
+    "options": [
+      { "id": "A", "text": "AWS Systems Manager Parameter Store with a SecureString parameter" },
+      { "id": "B", "text": "AWS Secrets Manager" },
+      { "id": "C", "text": "An encrypted S3 object with versioning enabled" },
+      { "id": "D", "text": "AWS KMS with a customer managed key" }
+    ],
+    "correct": ["B"],
+    "rationale": "AWS Secrets Manager provides built-in automatic rotation for RDS, Aurora, Redshift, and DocumentDB credentials using AWS-managed Lambda rotation functions. It also supports custom Lambda functions for other secret types. Parameter Store SecureString can store encrypted secrets but has no built-in rotation mechanism — rotation must be implemented manually. S3 and KMS alone do not provide secret management or rotation capabilities.",
+    "sourceUrl": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html",
+    "tags": ["secrets-manager", "rotation", "rds", "parameter-store"]
+  },
+  {
+    "id": "d1-1-3-q04",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A solutions architect needs to encrypt an EC2 instance's existing unencrypted root EBS volume. The instance is currently running. Which process is correct?",
+    "options": [
+      { "id": "A", "text": "Use the AWS Console to enable encryption on the running volume directly — encryption is applied online." },
+      { "id": "B", "text": "Stop the instance, then enable encryption on the volume from the Volumes console." },
+      { "id": "C", "text": "Create a snapshot of the volume, copy the snapshot with encryption enabled, create a new encrypted volume from the snapshot, and replace the original volume." },
+      { "id": "D", "text": "Use AWS DataSync to copy the unencrypted volume to an encrypted volume with zero downtime." }
+    ],
+    "correct": ["C"],
+    "rationale": "There is no in-place encryption feature for EBS volumes. The only supported method is: (1) snapshot the unencrypted volume, (2) copy the snapshot specifying a KMS CMK (this creates an encrypted snapshot), (3) create a new encrypted EBS volume from the encrypted snapshot, (4) stop the instance and swap volumes. Options A and B describe capabilities that do not exist. DataSync is for migrating data between storage services, not encrypting EBS volumes.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html",
+    "tags": ["ebs", "encryption", "snapshot", "kms"]
+  },
+  {
+    "id": "d1-1-3-q05",
+    "objective": "1.3 — Determine Appropriate Data Security Controls",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company needs to identify all S3 buckets in their account that contain personally identifiable information (PII) such as social security numbers and credit card data. Which AWS service is designed for this purpose?",
+    "options": [
+      { "id": "A", "text": "AWS GuardDuty" },
+      { "id": "B", "text": "AWS Inspector" },
+      { "id": "C", "text": "Amazon Macie" },
+      { "id": "D", "text": "AWS Config with managed rules" }
+    ],
+    "correct": ["C"],
+    "rationale": "Amazon Macie uses machine learning and pattern matching to automatically discover and classify sensitive data in S3, including PII (SSNs, credit card numbers, passport numbers, names, addresses), credentials (API keys, private keys), and other sensitive data types. GuardDuty detects threats and anomalous activity but does not classify data content. Inspector scans EC2 instances and container images for software vulnerabilities. AWS Config evaluates resource configurations against compliance rules but does not scan data content.",
+    "sourceUrl": "https://docs.aws.amazon.com/macie/latest/user/what-is-macie.html",
+    "tags": ["macie", "pii", "s3", "data-classification"]
+  }
+]
+*/}

@@ -5,6 +5,394 @@ domain: 1
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 1.1 — Design Secure Access to AWS Resources
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+AWS Identity and Access Management (IAM) is the backbone of every secure AWS architecture. It controls **who** can do **what** on **which** AWS resources. Every API call in AWS passes through IAM before it is allowed or denied, making it the single most important security layer you will design for.
+
+IAM operates on the principle of **least privilege**: identities start with zero permissions and you explicitly grant only what is required. This is fundamentally different from network firewalls that start open and you close them down. The combination of identities (users, groups, roles) and policies (permission documents in JSON) forms a complete access-control system that scales from a single developer account to a global multi-account enterprise.
+
+AWS Organizations extends IAM beyond individual accounts with **Service Control Policies (SCPs)**, which set the outer permission boundary for every identity in an organizational unit (OU). Together, IAM policies and SCPs form a two-layer permission model where both layers must grant access before any action is permitted.
+
+## Key Components
+
+- **IAM Users** — Long-term identities with permanent credentials (access key + secret). Used for programmatic access by CI/CD pipelines or developers. Best practice: minimize user count, prefer roles.
+- **IAM Groups** — Collections of users that share the same policies. Groups cannot be nested and cannot be assumed like a role.
+- **IAM Roles** — Temporary identities assumed by AWS services, federated users, or other accounts. No permanent credentials — credentials are issued by STS and rotate automatically (default 1 hour, max 12 hours for most roles, up to 43,200 seconds / 12 hours via `DurationSeconds`).
+- **IAM Policies** — JSON documents that define Allow or Deny statements for actions on resources.
+  - *Identity-based policies* — attached to users, groups, or roles
+  - *Resource-based policies* — attached to resources (S3 buckets, SQS queues, KMS keys, Lambda functions)
+  - *Permission boundaries* — maximum-permission cap on a user or role; the effective permissions are the intersection of the identity policy AND the boundary
+  - *SCPs* — applied at the AWS Organizations level to accounts or OUs; define the outer ceiling
+  - *Session policies* — passed inline when assuming a role; further restrict the role's permissions for that session
+- **AWS STS (Security Token Service)** — Issues temporary credentials. Key API actions: `AssumeRole`, `AssumeRoleWithSAML`, `AssumeRoleWithWebIdentity`, `GetSessionToken`.
+- **IAM Identity Center (AWS SSO)** — Centralized workforce access management with SAML federation to external IdPs (Azure AD, Okta).
+- **IAM Access Analyzer** — Continuously scans resource-based policies and identifies resources shared outside the account or organization.
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Policy Evaluation Logic
+
+When an AWS principal makes an API call, IAM evaluates policies in this strict order:
+
+1. **Explicit Deny** — Any deny in any policy immediately blocks the request. This is absolute and cannot be overridden by any Allow.
+2. **SCPs** — If the account is part of AWS Organizations, the SCP must allow the action. No SCP = implicit deny for accounts in an OU (if root has no permissive SCP attached at the management level).
+3. **Resource-based policies** — If the resource has a policy, an Allow here can grant access even without an identity-based Allow (for same-account access). For cross-account, both the identity policy AND the resource policy must allow.
+4. **Identity-based policies** — The principal's attached policies are evaluated.
+5. **Permission boundaries** — If a boundary is set, the action must also be allowed by the boundary.
+6. **Session policies** — If a session policy is passed at AssumeRole time, the action must also be allowed by the session policy.
+7. **Implicit Deny** — If no explicit Allow is found after all the above, the request is denied.
+
+**Final rule: Explicit Deny > SCP > Resource policy > Identity policy > Permission boundary > Session policy > Implicit deny.**
+
+### Permission Boundaries
+
+A permission boundary is an IAM managed policy attached to a user or role that defines the **maximum** permissions it can have. It does **not** grant permissions — it only caps them.
+
+Example: A role has `AdministratorAccess` attached (Allow *:*) but a permission boundary that only allows `s3:*`. The effective permissions are only S3 operations.
+
+Use cases:
+- Allow developers to create IAM roles (so they can build applications) but prevent privilege escalation — the developer can only create roles whose permissions do not exceed the boundary.
+- Delegated administrator pattern: give a team account full power but cap it so they cannot touch billing or certain security services.
+
+### Cross-Account Access with Trust Policies
+
+To allow principal from Account A to access resources in Account B:
+
+1. In **Account B**: create an IAM role with:
+   - A **trust policy** specifying Account A (or a specific role/user in A) as the trusted principal.
+   - A **permissions policy** granting access to the resources in B.
+
+2. In **Account A**: the user/role must have permission to call `sts:AssumeRole` on the role ARN in Account B.
+
+```json
+// Trust policy in Account B's role
+{
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::111122223333:role/DevRole"
+  },
+  "Action": "sts:AssumeRole"
+}
+```
+
+Both sides must grant: Account A allows calling AssumeRole, Account B's trust policy allows Account A's principal.
+
+### STS AssumeRoleWithWebIdentity
+
+Used when mobile apps or web applications authenticate via an OIDC-compatible IdP (Amazon Cognito, Google, Facebook). The app obtains an OIDC token, passes it to STS, and receives temporary AWS credentials.
+
+- Cognito Identity Pools sit in front of `AssumeRoleWithWebIdentity` for mobile scenarios.
+- Unauthenticated access (guest users) also supported via Cognito Identity Pools.
+
+### SAML 2.0 Federation
+
+For enterprise SSO with AD/LDAP:
+1. Users authenticate to corporate IdP.
+2. IdP returns SAML assertion.
+3. User's browser posts assertion to `https://signin.aws.amazon.com/saml`.
+4. AWS STS issues temporary credentials mapped to an IAM role.
+
+### IAM Access Analyzer
+
+- Continuously monitors resource-based policies (S3, IAM roles, KMS, SQS, Lambda, Secrets Manager).
+- Alerts when a resource is accessible from outside the **zone of trust** (account or organization).
+- Use **Access Analyzer policy validation** to check new policies against best practices before deploying.
+- **Access Analyzer findings** are not automatically remediated — they are findings for manual review.
+
+## Decision Flow
+
+| Scenario | Solution |
+|---|---|
+| EC2 instance needs to call S3 | IAM role attached to EC2 as instance profile — never hardcode credentials |
+| Lambda needs DynamoDB access | IAM role as Lambda execution role |
+| Developer needs temporary elevated access | AssumeRole to a break-glass role with MFA condition |
+| Mobile app with Cognito users needs S3 | Cognito Identity Pool → AssumeRoleWithWebIdentity |
+| Corporate employees with AD need AWS Console | SAML federation via IAM Identity Center |
+| Prevent an account from leaving AWS Organizations | SCP Deny `organizations:LeaveOrganization` |
+| Developer creates IAM roles but must not escalate | Attach a permission boundary to all roles they create |
+| Audit which resources are publicly accessible | IAM Access Analyzer |
+| Cross-account read of another account's S3 bucket | Role in target account + trust policy trusting source account |
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Exercise 1 — Create an IAM Role for EC2 and Test It
+
+```bash
+# 1. Create a trust policy document for EC2
+cat > ec2-trust-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# 2. Create the IAM role
+aws iam create-role \
+  --role-name EC2S3ReadRole \
+  --assume-role-policy-document file://ec2-trust-policy.json
+
+# 3. Attach S3 read-only managed policy
+aws iam attach-role-policy \
+  --role-name EC2S3ReadRole \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+# 4. Create an instance profile and add the role to it
+aws iam create-instance-profile --instance-profile-name EC2S3ReadProfile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name EC2S3ReadProfile \
+  --role-name EC2S3ReadRole
+
+# 5. Launch an EC2 instance with this profile (replace with your AMI + subnet IDs)
+aws ec2 run-instances \
+  --image-id ami-0abcdef1234567890 \
+  --instance-type t3.micro \
+  --iam-instance-profile Name=EC2S3ReadProfile \
+  --subnet-id subnet-12345678 \
+  --count 1
+
+# 6. From inside the instance, verify credentials come from the role
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2S3ReadRole
+```
+
+### Exercise 2 — Create a Permission Boundary
+
+```bash
+# 1. Create the boundary policy (max S3 + CloudWatch only)
+cat > boundary-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:*", "cloudwatch:*", "logs:*"],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name DeveloperBoundary \
+  --policy-document file://boundary-policy.json
+
+# 2. Attach boundary when creating a new user
+aws iam create-user --user-name bounded-developer
+
+aws iam put-user-permissions-boundary \
+  --user-name bounded-developer \
+  --permissions-boundary arn:aws:iam::123456789012:policy/DeveloperBoundary
+
+# 3. Now attach AdministratorAccess — effective permissions are still only S3+CW
+aws iam attach-user-policy \
+  --user-name bounded-developer \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+# Test: trying to create an EC2 instance will be denied despite AdminAccess
+```
+
+### Exercise 3 — Cross-Account Role Assumption
+
+```bash
+# === In ACCOUNT B (target) ===
+# Create role with trust for Account A
+cat > cross-account-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::ACCOUNT_A_ID:root" },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "Bool": { "aws:MultiFactorAuthPresent": "true" }
+    }
+  }]
+}
+EOF
+
+aws iam create-role \
+  --role-name CrossAccountS3Role \
+  --assume-role-policy-document file://cross-account-trust.json
+
+aws iam attach-role-policy \
+  --role-name CrossAccountS3Role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+# === In ACCOUNT A (source) ===
+# Allow the user to assume the role in B
+cat > assume-role-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::ACCOUNT_B_ID:role/CrossAccountS3Role"
+  }]
+}
+EOF
+
+# From Account A, assume the role
+aws sts assume-role \
+  --role-arn arn:aws:iam::ACCOUNT_B_ID:role/CrossAccountS3Role \
+  --role-session-name MySession \
+  --serial-number arn:aws:iam::ACCOUNT_A_ID:mfa/myuser \
+  --token-code 123456
+
+# Use the returned credentials to access Account B's S3
+export AWS_ACCESS_KEY_ID=<AccessKeyId from response>
+export AWS_SECRET_ACCESS_KEY=<SecretAccessKey from response>
+export AWS_SESSION_TOKEN=<SessionToken from response>
+aws s3 ls  # Now listing Account B's buckets
+```
+
+### Exercise 4 — Enable IAM Access Analyzer
+
+```bash
+# Create an analyzer scoped to the account
+aws accessanalyzer create-analyzer \
+  --analyzer-name AccountAccessAnalyzer \
+  --type ACCOUNT
+
+# List findings (resources accessible outside the account)
+aws accessanalyzer list-findings \
+  --analyzer-arn arn:aws:accessanalyzer:us-east-1:123456789012:analyzer/AccountAccessAnalyzer
+
+# Archive a finding (mark as expected/intentional)
+aws accessanalyzer update-findings \
+  --analyzer-arn arn:aws:accessanalyzer:us-east-1:123456789012:analyzer/AccountAccessAnalyzer \
+  --status ARCHIVED \
+  --ids "finding-id-here"
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **EC2/Lambda accessing AWS services** — The answer is always an **IAM role** (instance profile for EC2, execution role for Lambda). Never hardcode access keys in user data, environment variables, or AMIs.
+- **Explicit Deny overrides everything** — If an SCP denies `s3:DeleteObject`, even the account root user cannot delete S3 objects. Even an inline policy with `Effect: Allow` on the same action is overridden.
+- **Permission boundary ≠ grant** — Attaching a permission boundary to a role does not give that role any permissions. The identity policy must also Allow the action. The boundary only caps the maximum.
+- **Cross-account role assumption requires trust on both sides** — The role in Account B must trust Account A (trust policy), AND the principal in Account A must have permission to call `sts:AssumeRole` on that role.
+- **STS AssumeRoleWithWebIdentity** — Used for Cognito-authenticated mobile users needing temporary AWS credentials. The app exchanges the Cognito/OIDC token for AWS STS credentials. This is distinct from `AssumeRoleWithSAML` (enterprise SAML IdP).
+- **IAM Identity Center vs. IAM Federation** — IAM Identity Center (SSO) is the preferred solution for workforce access across multiple accounts. Traditional SAML federation is per-account and harder to manage at scale.
+
+## Common Traps
+
+- **Confusing SCPs and IAM policies** — SCPs do not grant permissions; they only restrict the maximum permissions available. An SCP `Allow *:*` does not give any actual permissions — the identity policy must also grant them.
+- **Resource-based policy same-account vs. cross-account** — Within the same account, a resource-based policy Allow (e.g., S3 bucket policy) is sufficient to grant access even without an identity-based policy. Cross-account requires **both** the resource policy and the identity policy to allow the action.
+- **Role session duration** — The default `DurationSeconds` for `AssumeRole` is 3,600 seconds (1 hour). The maximum is set on the role itself (`MaxSessionDuration`, up to 43,200 seconds / 12 hours). Passing a `DurationSeconds` larger than `MaxSessionDuration` causes an error.
+</ExamAngle>
+
+<Flashcard front="What wins: an explicit Deny or an explicit Allow in IAM?" back="Explicit Deny always wins — it overrides any Allow in any attached policy, including administrative policies." />
+<Flashcard front="What is a permission boundary?" back="A managed policy attached to a user or role that defines the MAXIMUM permissions it can have. It does not grant permissions — it only caps them. Effective permissions = intersection of identity policy AND boundary." />
+<Flashcard front="How does EC2 get temporary AWS credentials without hardcoded keys?" back="An IAM role is attached to the EC2 instance as an instance profile. The EC2 metadata service (169.254.169.254) vends temporary STS credentials from that role, which rotate automatically." />
+<Flashcard front="What does STS AssumeRoleWithWebIdentity enable?" back="Mobile/web apps authenticated via OIDC IdPs (Cognito, Google, Facebook) to exchange their OIDC token for temporary AWS credentials tied to an IAM role." />
+<Flashcard front="What does IAM Access Analyzer detect?" back="Resources (S3 buckets, IAM roles, KMS keys, SQS queues, Lambda, Secrets Manager) whose resource-based policies grant access to principals outside the account or organization (the zone of trust)." />
+
+{/* QUIZ
+[
+  {
+    "id": "d1-1-1-q01",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company's EC2 instances need to read objects from an S3 bucket. The security team forbids storing long-term credentials on instances. Which solution meets this requirement?",
+    "options": [
+      { "id": "A", "text": "Create an IAM user, generate an access key, and store it in the EC2 user data script." },
+      { "id": "B", "text": "Create an IAM role with S3 read permissions and attach it to the EC2 instances as an instance profile." },
+      { "id": "C", "text": "Create an IAM user, generate an access key, and store it in an environment variable on each instance." },
+      { "id": "D", "text": "Add the EC2 instance IP addresses to the S3 bucket policy to allow access." }
+    ],
+    "correct": ["B"],
+    "rationale": "IAM roles attached as instance profiles provide temporary credentials via the EC2 metadata service with no long-term keys to store or rotate. Options A and C both store permanent credentials on the instance. Option D grants access by IP, not identity, and does not avoid credentials.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2.html",
+    "tags": ["iam", "ec2", "roles", "instance-profile"]
+  },
+  {
+    "id": "d1-1-1-q02",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An AWS Organizations management account has an SCP attached to a production OU that explicitly denies s3:DeleteBucket for all principals. A developer in a member account has the AdministratorAccess policy attached to their IAM user. Can the developer delete an S3 bucket in their account?",
+    "options": [
+      { "id": "A", "text": "Yes, because AdministratorAccess grants all permissions including s3:DeleteBucket." },
+      { "id": "B", "text": "Yes, because IAM policies take precedence over SCPs for actions within the same account." },
+      { "id": "C", "text": "No, because an SCP explicit deny overrides any IAM Allow, including AdministratorAccess." },
+      { "id": "D", "text": "No, because the developer must also have the PowerUserAccess policy to perform destructive operations." }
+    ],
+    "correct": ["C"],
+    "rationale": "An SCP explicit deny cannot be overridden by any IAM policy, including AdministratorAccess or even the root user of the member account. SCPs set the outer permission ceiling. If the SCP denies s3:DeleteBucket, no principal in that OU can perform that action.",
+    "sourceUrl": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html",
+    "tags": ["iam", "scp", "organizations", "explicit-deny"]
+  },
+  {
+    "id": "d1-1-1-q03",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A solutions architect wants to allow junior developers to create IAM roles for their Lambda functions, but prevent them from creating roles with more permissions than the developers themselves have. Which IAM feature should be used?",
+    "options": [
+      { "id": "A", "text": "Service control policies (SCPs) in AWS Organizations" },
+      { "id": "B", "text": "IAM permission boundaries with a condition requiring iam:PassRole" },
+      { "id": "C", "text": "IAM permission boundaries — require that any role the developer creates must have the same boundary attached" },
+      { "id": "D", "text": "IAM Access Analyzer to detect over-privileged roles after creation" }
+    ],
+    "correct": ["C"],
+    "rationale": "Permission boundaries prevent privilege escalation by developers who can create IAM roles. You grant the developer iam:CreateRole but with a condition (iam:PermissionsBoundary) that forces every role they create to have a specific boundary attached. This ensures any role they create cannot exceed the boundary's allowed actions. SCPs apply at the account level. IAM Access Analyzer detects but does not prevent. iam:PassRole controls passing existing roles, not creating new ones.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html",
+    "tags": ["iam", "permission-boundary", "privilege-escalation"]
+  },
+  {
+    "id": "d1-1-1-q04",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A mobile application authenticates users with Amazon Cognito User Pools. After login, the app needs to make calls to Amazon DynamoDB on behalf of the user. Which approach provides temporary AWS credentials to the app?",
+    "options": [
+      { "id": "A", "text": "Create an IAM user for the mobile app and embed the access key in the application binary." },
+      { "id": "B", "text": "Use Amazon Cognito Identity Pools to exchange the Cognito token for temporary AWS credentials via STS AssumeRoleWithWebIdentity." },
+      { "id": "C", "text": "Use STS GetSessionToken with the Cognito username and password." },
+      { "id": "D", "text": "Generate a pre-signed URL from the server and pass it to the mobile app." }
+    ],
+    "correct": ["B"],
+    "rationale": "Cognito Identity Pools (federated identities) call STS AssumeRoleWithWebIdentity using the Cognito token, returning temporary AWS credentials scoped to an IAM role. This is the standard pattern for mobile apps. Option A embeds long-term credentials which is a security risk. GetSessionToken requires IAM user credentials. Pre-signed URLs are for specific S3 operations, not DynamoDB.",
+    "sourceUrl": "https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-identity.html",
+    "tags": ["cognito", "sts", "mobile", "web-identity"]
+  },
+  {
+    "id": "d1-1-1-q05",
+    "objective": "1.1 — Design Secure Access to AWS Resources",
+    "domain": 1,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An IAM role named DataRole in Account B has a trust policy that trusts Account A. An IAM user in Account A has the following policy: {\"Effect\": \"Allow\", \"Action\": \"sts:AssumeRole\", \"Resource\": \"arn:aws:iam::ACCOUNT_B:role/DataRole\"}. The user tries to assume DataRole but gets an Access Denied error. What is the MOST likely cause?",
+    "options": [
+      { "id": "A", "text": "The trust policy in Account B must specify the exact IAM user ARN from Account A, not just account root." },
+      { "id": "B", "text": "Cross-account role assumption is not supported between two separate AWS accounts." },
+      { "id": "C", "text": "The role's permissions policy in Account B does not grant the user any actions." },
+      { "id": "D", "text": "The user's policy allows sts:AssumeRole, so both sides are configured correctly and the error must be transient." }
+    ],
+    "correct": ["A"],
+    "rationale": "When a trust policy specifies `arn:aws:iam::ACCOUNT_A_ID:root`, it means any principal in Account A with explicit permission to AssumeRole can assume it. However, if the trust policy does not reference the specific user and the user's own policy is not attached correctly, access is denied. Most commonly, if the trust policy only says `root`, the IAM user still needs its own policy allowing sts:AssumeRole on that role ARN — both sides must grant the action. The question describes a scenario where the trust policy trusts 'Account A' (root) and the user has sts:AssumeRole, so the most likely fix is that the trust policy must reference the specific user or the trust policy trusts root but the user's identity policy hasn't been evaluated correctly. The canonical trap answer is that both sides must allow the action explicitly.",
+    "sourceUrl": "https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html",
+    "tags": ["iam", "cross-account", "trust-policy", "sts"]
+  }
+]
+*/}

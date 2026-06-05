@@ -5,6 +5,426 @@ domain: 3
 weight: "Medium"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 3.4 — High-Performing Network Architectures
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Network performance on AWS spans two dimensions: **throughput and latency to end users** (handled by CloudFront and Global Accelerator) and **throughput and reliability of connectivity between AWS resources and between AWS and on-premises** (handled by VPC peering, Transit Gateway, Direct Connect, and VPN). A CDN that serves cached content from an edge 10 ms from the user is hundreds of milliseconds faster than the same request hitting a single-region origin. A dedicated 10 Gbps Direct Connect link provides consistent bandwidth to a corporate data center that a VPN over the public internet can never guarantee.
+
+AWS's global network — a private fiber backbone connecting all regions and edge locations — is the foundation for these performance gains. Services like CloudFront and Global Accelerator exploit this backbone: user traffic enters the nearest AWS edge location over the internet (shortest possible internet leg), then travels from edge to origin entirely over the AWS private backbone. This "cold potato routing" strategy is fundamentally faster and more reliable than end-to-end public internet routing ("hot potato"), where traffic traverses many unpredictable ISP hops.
+
+VPC connectivity design involves trade-offs between simplicity and scale: VPC Peering is simple and free for same-region traffic but does not scale well beyond a small mesh (n*(n-1)/2 peering connections for n VPCs). Transit Gateway acts as a centralized hub, allowing any-to-any connectivity between hundreds of VPCs with a single connection per VPC — the hub-and-spoke model. VPC Endpoints remove the need for internet gateways or NAT for access to AWS services, improving security posture and often reducing cost.
+
+## Key Components
+
+- **Amazon CloudFront** — Global CDN: edge caching, origin access control, Lambda@Edge, CloudFront Functions
+- **AWS Global Accelerator** — Anycast static IP routing to nearest healthy endpoint over AWS backbone for TCP/UDP
+- **VPC Peering** — Private connectivity between two VPCs (non-transitive)
+- **AWS Transit Gateway** — Centralized hub for VPC-to-VPC and VPN/Direct Connect connectivity (hub-and-spoke)
+- **AWS Direct Connect** — Dedicated physical network connection from on-premises to AWS
+- **AWS VPN (Site-to-Site)** — IPSec VPN over the internet between on-premises and VPC
+- **AWS PrivateLink / VPC Endpoints** — Interface endpoints (ENI in VPC) and Gateway endpoints (route table) for AWS services
+- **Elastic Fabric Adapter (EFA)** — High-performance network interface for HPC (MPI, collective ops)
+- **Enhanced Networking (ENA)** — High-performance EC2 networking (up to 100 Gbps)
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Amazon CloudFront
+
+CloudFront is a global CDN with over 450 edge locations (Points of Presence) and 13 Regional Edge Caches. It accelerates delivery of static, dynamic, and streaming content by serving cached responses from the edge nearest to the viewer.
+
+**Core Concepts:**
+- **Distribution**: A CloudFront deployment with one or more origins and cache behaviors.
+- **Origin**: The source of authoritative content — S3 bucket, ALB, EC2 instance, API Gateway, or any HTTP server.
+- **Cache Behavior**: Rules that match URL path patterns and define TTL, origin, forwarded headers/cookies/query strings, viewer protocol policy, and edge function associations.
+- **TTL**: How long CloudFront caches an object at the edge before revalidating with the origin. Set via Cache-Control or Expires headers from the origin, or override with minimum/default/maximum TTL in cache behaviors.
+- **Invalidation**: Programmatically removes specific objects from all edge caches before TTL expiry. First 1,000 invalidation paths per month are free; charges apply beyond that. Use versioned filenames (cache busting) instead where possible.
+
+**Origin Access Control (OAC)**: Restricts direct S3 bucket access — only CloudFront can access the S3 origin. Uses SigV4 signing. OAC is the current recommended approach (supersedes legacy Origin Access Identity/OAI). Ensure the S3 bucket policy allows `s3:GetObject` only from the CloudFront service principal with the distribution ID condition.
+
+**SSL/TLS Certificates**: To use HTTPS with a custom domain on CloudFront, the ACM certificate must be provisioned in **us-east-1 (N. Virginia)**, regardless of where the CloudFront distribution serves traffic. This is a hard requirement — CloudFront is a global service that reads certificates from us-east-1.
+
+**Edge Functions Comparison:**
+
+| Feature | CloudFront Functions | Lambda@Edge |
+|---------|---------------------|-------------|
+| Execution location | 450+ PoPs | ~20 Regional Edge Caches |
+| Trigger events | Viewer Request, Viewer Response | All 4 CloudFront events |
+| Max execution time | 1 ms | 5 s (Viewer) / 30 s (Origin) |
+| Network calls | Not supported | Supported |
+| Cost | ~$0.10/M invocations | ~$0.60/M invocations |
+| Use cases | URL rewrite, header inject, auth token validation | Auth with external IdP, A/B testing with backend calls |
+
+### AWS Global Accelerator
+
+Global Accelerator provides **two static Anycast IPv4 addresses** (and optionally IPv6) that route traffic to your endpoints using the AWS global backbone network.
+
+**How Anycast routing works**: Both IP addresses are simultaneously advertised from all AWS edge locations. A user connecting to the IP is routed by BGP to the nearest edge location. From there, traffic travels over the AWS private backbone to the healthy endpoint in the configured AWS region — avoiding the latency variance of multi-hop public internet routing.
+
+**Endpoint types**: ALB, NLB, EC2 instances, Elastic IPs (in one or multiple regions). Endpoint **weights** control the proportion of traffic sent to each endpoint in a traffic dial — useful for blue/green deployments and gradual traffic shifting. **Health checks** automatically route around unhealthy endpoints, providing failover.
+
+**CloudFront vs Global Accelerator:**
+
+| | CloudFront | Global Accelerator |
+|--|------------|-------------------|
+| Protocol | HTTP/HTTPS | TCP, UDP, HTTP/HTTPS |
+| Caching | Yes | No (proxies to origin) |
+| Static IPs | No (CNAME-based) | Yes (two Anycast IPs) |
+| Best for | Content delivery, static assets, APIs (with caching) | Non-HTTP, gaming, IoT, VoIP, or when static IPs are required |
+| DDoS protection | Shield Standard built-in | Shield Standard built-in |
+| IP whitelisting | Not applicable | Customer can whitelist the 2 static IPs |
+
+### VPC Peering
+
+VPC Peering creates a **private, non-transitive** network connection between two VPCs. Traffic stays on the AWS network — no VPN or internet gateway required. VPC Peering supports same-region (intra-region, free) and cross-region (inter-region, charged per GB).
+
+**Non-transitive**: If VPC A is peered with VPC B, and VPC B is peered with VPC C, VPC A **cannot** communicate with VPC C through VPC B. A direct peering connection between A and C is required. For large numbers of VPCs, this creates an unmanageable mesh — use Transit Gateway instead.
+
+**Requirements**: CIDR blocks must not overlap. Route tables in each VPC must have routes pointing to the peering connection for the remote CIDR. Security groups can reference the security group IDs from the peer VPC (same region only).
+
+### AWS Transit Gateway
+
+Transit Gateway (TGW) acts as a **regional virtual router** — a cloud hub that interconnects VPCs and on-premises networks through a single gateway per VPC.
+
+**Key features:**
+- Attach VPCs, VPN connections, Direct Connect Gateways, and other Transit Gateways (inter-region peering)
+- **Route Tables**: TGW maintains its own route tables. Attachments can be associated with route tables, enabling traffic segmentation (e.g., development VPCs cannot reach production VPCs)
+- **Multicast**: TGW supports IP multicast traffic across VPCs (unique feature, not possible with VPC Peering)
+- **Transit Gateway Network Manager**: Centralized monitoring of the global network topology
+
+**TGW vs VPC Peering:**
+
+| | VPC Peering | Transit Gateway |
+|--|-------------|-----------------|
+| Topology | Mesh (n*(n-1)/2 connections) | Hub-and-spoke (n connections) |
+| Transitive routing | No | Yes |
+| Cross-region | Yes (direct) | Yes (TGW peering) |
+| Bandwidth limit | No limit | 50 Gbps per attachment |
+| Cost | Per-GB transfer (cross-region) | Per-attachment hour + per-GB |
+| Best for | 2–3 VPCs | Many VPCs or on-prem connectivity |
+
+### AWS VPN and Direct Connect
+
+**Site-to-Site VPN**: IPSec encrypted tunnels over the public internet between an on-premises Customer Gateway (CGW) and a Virtual Private Gateway (VGW) or Transit Gateway. Two tunnels per VPN connection for redundancy. Max bandwidth: ~1.25 Gbps per tunnel. Subject to internet latency variability. Fast to provision (minutes). Use for: backup connectivity, small offices, or when rapid setup is needed.
+
+**AWS Direct Connect (DX)**: Dedicated physical connection (1 Gbps, 10 Gbps, 100 Gbps) from an on-premises router to an AWS Direct Connect location. Private connectivity that bypasses the public internet — consistent bandwidth, lower and more predictable latency. Setup time: weeks to months (physical cross-connect). Two connection types:
+- **Dedicated Connection**: Physical fiber from your router to an AWS port at a DX location
+- **Hosted Connection**: Sub-1 Gbps connections provisioned by an AWS Direct Connect Partner
+
+**Direct Connect Gateway**: Connects a single Direct Connect connection to multiple VPCs in **different regions** (same AWS account or other accounts). Without a Direct Connect Gateway, a DX connection only reaches a VGW in a single region.
+
+**Resilient DX Architecture:**
+- **Single DX connection**: Single point of failure — use VPN as backup
+- **Two DX connections from same location**: Protects against device failure, not location failure
+- **Two DX connections from different locations**: Protects against location failure (recommended for HA)
+- **DX + VPN**: DX primary path, VPN failover over internet — cost-effective HA
+
+### AWS PrivateLink and VPC Endpoints
+
+**Gateway Endpoints** (free, route-table-based):
+- Available for **S3 and DynamoDB only**
+- Traffic routes directly to the service without traversing a NAT gateway or internet gateway
+- Added as a route target in VPC route tables pointing to the service prefix list
+- No security group; controlled by endpoint policies and IAM
+
+**Interface Endpoints** (charged, ENI-based):
+- Create an **Elastic Network Interface (ENI)** in your subnet with a private IP
+- Available for most AWS services (EC2, SSM, SNS, SQS, Kinesis, etc.) and third-party services via AWS PrivateLink
+- Charged per hour per AZ + per-GB data processed
+- Controlled by security groups and endpoint policies
+- Use **Private DNS**: when enabled, the service's default DNS name resolves to the private IP of the interface endpoint
+
+**PrivateLink for SaaS**: Service providers publish their NLB-backed service on PrivateLink. Consumers create interface endpoints to access the service privately without needing internet connectivity, VPC peering, or exposed CIDRs.
+
+### Enhanced Networking and EFA
+
+**Enhanced Networking (ENA)**: Intel/AMD EC2 instances use Elastic Network Adapter (ENA) to deliver high-throughput, low-latency networking (up to 100 Gbps on supported instances). Enabled by default on current-gen instances. Uses SR-IOV to bypass the hypervisor for network I/O.
+
+**Elastic Fabric Adapter (EFA)**: A network interface purpose-built for HPC and ML training. Adds an **OS-bypass** capability allowing MPI (Message Passing Interface) and NCCL (NVIDIA Collective Communications Library) to communicate directly with the EFA hardware, bypassing the OS kernel network stack. Delivers extremely low latency and high bandwidth between EC2 instances in a cluster placement group. Required for: large MPI jobs, distributed deep learning training (multi-node), any workload needing inter-node bandwidth > standard ENA.
+
+## Decision Flow
+
+```
+Delivering content to global users:
+  Static/cacheable assets, HTTP/S → CloudFront
+  Need static IPs or TCP/UDP (non-HTTP) → Global Accelerator
+  Need both caching + static IPs → CloudFront + Global Accelerator (GA as origin for CloudFront)
+
+Connecting VPCs:
+  2–3 VPCs, same or cross-region, simple mesh → VPC Peering
+  Many VPCs or need transitive routing → Transit Gateway
+  Central shared services VPC (DNS, security tools) → PrivateLink
+
+Connecting on-premises to AWS:
+  Dedicated bandwidth, consistent latency, SLA → Direct Connect
+  Quick setup, encrypted, over internet → Site-to-Site VPN
+  HA: primary DX + failover → Direct Connect + VPN backup
+  One DX to many regions → Direct Connect Gateway
+
+Accessing AWS services privately from VPC:
+  S3 or DynamoDB → Gateway Endpoint (free)
+  Any other AWS service → Interface Endpoint (PrivateLink)
+
+HPC inter-node communication:
+  Standard high throughput → Enhanced Networking (ENA)
+  MPI / OS-bypass / maximum performance → EFA in Cluster Placement Group
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Create a CloudFront Distribution with S3 Origin and OAC
+
+```bash
+# Create Origin Access Control
+OAC_ID=$(aws cloudfront create-origin-access-control \
+  --origin-access-control-config '{
+    "Name": "MyS3OAC",
+    "Description": "OAC for S3 bucket",
+    "SigningProtocol": "sigv4",
+    "SigningBehavior": "always",
+    "OriginAccessControlOriginType": "s3"
+  }' \
+  --query 'OriginAccessControl.Id' --output text)
+
+# Create CloudFront distribution
+aws cloudfront create-distribution \
+  --distribution-config '{
+    "CallerReference": "my-cf-dist-001",
+    "Origins": {
+      "Quantity": 1,
+      "Items": [{
+        "Id": "MyS3Origin",
+        "DomainName": "my-bucket.s3.us-east-1.amazonaws.com",
+        "S3OriginConfig": {"OriginAccessIdentity": ""},
+        "OriginAccessControlId": "'$OAC_ID'"
+      }]
+    },
+    "DefaultCacheBehavior": {
+      "TargetOriginId": "MyS3Origin",
+      "ViewerProtocolPolicy": "redirect-to-https",
+      "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+      "AllowedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}
+    },
+    "Comment": "My S3 Distribution",
+    "Enabled": true,
+    "HttpVersion": "http2and3"
+  }'
+```
+
+### Create a Transit Gateway and Attach VPCs
+
+```bash
+# Create Transit Gateway
+TGW_ID=$(aws ec2 create-transit-gateway \
+  --description "My Hub TGW" \
+  --options AmazonSideAsn=64512,AutoAcceptSharedAttachments=disable,DefaultRouteTableAssociation=enable,DefaultRouteTablePropagation=enable,VpnEcmpSupport=enable,DnsSupport=enable \
+  --query 'TransitGateway.TransitGatewayId' --output text)
+
+# Attach VPC 1
+aws ec2 create-transit-gateway-vpc-attachment \
+  --transit-gateway-id $TGW_ID \
+  --vpc-id vpc-0aaa111 \
+  --subnet-ids subnet-0aa1 subnet-0aa2
+
+# Attach VPC 2
+aws ec2 create-transit-gateway-vpc-attachment \
+  --transit-gateway-id $TGW_ID \
+  --vpc-id vpc-0bbb222 \
+  --subnet-ids subnet-0bb1 subnet-0bb2
+
+# Add routes in VPC1 route table pointing to TGW for VPC2 CIDR
+aws ec2 create-route \
+  --route-table-id rtb-0vpc1rt \
+  --destination-cidr-block 10.1.0.0/16 \
+  --transit-gateway-id $TGW_ID
+```
+
+### Create a Gateway VPC Endpoint for S3
+
+```bash
+# Get route tables for the VPC
+aws ec2 describe-route-tables \
+  --filters Name=vpc-id,Values=vpc-0abc123 \
+  --query 'RouteTables[*].RouteTableId'
+
+# Create Gateway endpoint for S3
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-0abc123 \
+  --service-name com.amazonaws.us-east-1.s3 \
+  --route-table-ids rtb-0subnet1rt rtb-0subnet2rt \
+  --vpc-endpoint-type Gateway
+
+# Verify — no NAT or internet gateway needed for S3 traffic
+aws ec2 describe-vpc-endpoints \
+  --filters Name=vpc-id,Values=vpc-0abc123 \
+  --query 'VpcEndpoints[*].{Service:ServiceName,State:State}'
+```
+
+### Create a Site-to-Site VPN with Transit Gateway
+
+```bash
+# Create Customer Gateway (on-premises router)
+CGW_ID=$(aws ec2 create-customer-gateway \
+  --type ipsec.1 \
+  --public-ip 203.0.113.12 \
+  --bgp-asn 65000 \
+  --query 'CustomerGateway.CustomerGatewayId' --output text)
+
+# Create VPN connection to Transit Gateway
+aws ec2 create-vpn-connection \
+  --type ipsec.1 \
+  --customer-gateway-id $CGW_ID \
+  --transit-gateway-id $TGW_ID \
+  --options StaticRoutesOnly=false
+
+# Download VPN configuration for your router make/model
+aws ec2 describe-vpn-connections \
+  --query 'VpnConnections[0].CustomerGatewayConfiguration'
+```
+
+### Create an Interface VPC Endpoint for SSM
+
+```bash
+# Create Interface endpoint for SSM (needed for EC2 in private subnets)
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-0abc123 \
+  --service-name com.amazonaws.us-east-1.ssm \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-0aa1 subnet-0bb1 \
+  --security-group-ids sg-0endpoint123 \
+  --private-dns-enabled
+
+# Also create endpoints for ssmmessages and ec2messages
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-0abc123 \
+  --service-name com.amazonaws.us-east-1.ssmmessages \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-0aa1 subnet-0bb1 \
+  --security-group-ids sg-0endpoint123 \
+  --private-dns-enabled
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **CloudFront ACM certificate region**: ACM certificates for CloudFront custom domains **must** be in **us-east-1 (N. Virginia)**. The exam regularly includes a distractor answer using the same region as the origin. Always choose us-east-1 for CloudFront SSL certificates regardless of origin location.
+- **Global Accelerator vs CloudFront**: Global Accelerator provides **static Anycast IPs** and is for **TCP/UDP or when static IPs are required**. CloudFront is for **HTTP/HTTPS content delivery with caching**. If the question mentions "non-HTTP," "gaming traffic," "IoT," "VoIP," or "static IP whitelisting" → Global Accelerator.
+- **VPC Peering non-transitive behavior**: VPC Peering does not support transitive routing. A↔B peering and B↔C peering does NOT allow A↔C communication. For large numbers of VPCs needing any-to-any connectivity → Transit Gateway.
+- **Gateway vs Interface VPC Endpoints**: Gateway endpoints are **free**, use **route tables**, and are available only for **S3 and DynamoDB**. Interface endpoints use **ENIs with private IPs**, are **charged per AZ per hour**, and support most other AWS services. Questions about cost-free private access to S3/DynamoDB → Gateway endpoint.
+- **Direct Connect consistency**: Direct Connect provides dedicated bandwidth and consistent, predictable latency unlike Site-to-Site VPN over the internet. Any question involving consistent latency, SLA-backed bandwidth, or dedicated connectivity → Direct Connect (not VPN).
+
+## Common Traps
+
+- **VPC Peering CIDR overlap**: If two VPCs have overlapping CIDR blocks, they cannot be peered. Exam scenarios involving VPC Peering failure → check for CIDR overlap. Transit Gateway also cannot resolve CIDR overlap — the addresses are fundamentally ambiguous.
+- **Direct Connect does not provide encryption by default**: Direct Connect is a private dedicated connection, but traffic is not encrypted in transit. For encryption over Direct Connect, run a Site-to-Site VPN over the Direct Connect link (MACsec is also supported on some DX connections). An exam question about "encrypted dedicated connection" → Direct Connect + VPN or MACsec.
+- **CloudFront Functions cannot make network calls**: CloudFront Functions run in a lightweight JavaScript engine with no access to external services. Any edge function logic requiring an outbound HTTP call to a database, auth service, or API must use Lambda@Edge, not CloudFront Functions. This is a common trap where a scenario requires both edge execution AND external calls.
+</ExamAngle>
+
+<Flashcard front="In which AWS region must an ACM certificate be provisioned for use with a CloudFront distribution?" back="US East (N. Virginia) — us-east-1. This is a hard requirement for CloudFront regardless of where the origin or viewers are located." />
+<Flashcard front="What is the key difference between Global Accelerator and CloudFront?" back="Global Accelerator: static Anycast IPs, routes TCP/UDP traffic over AWS backbone to endpoints, no caching. CloudFront: CNAME-based CDN, caches HTTP/HTTPS content at edge. Use Global Accelerator when you need static IPs, non-HTTP protocols, or no caching." />
+<Flashcard front="Why can't VPC Peering be used for hub-and-spoke connectivity with many VPCs?" back="VPC Peering is non-transitive — traffic from VPC A cannot pass through VPC B to reach VPC C. For hub-and-spoke or full mesh with many VPCs, use Transit Gateway, which supports transitive routing with one attachment per VPC." />
+<Flashcard front="What is the difference between Gateway and Interface VPC Endpoints?" back="Gateway Endpoint: free, route-table-based, available only for S3 and DynamoDB. Interface Endpoint: creates an ENI in your subnet with a private IP, charged per AZ/hour, available for most AWS services and PrivateLink providers." />
+<Flashcard front="When should you use Elastic Fabric Adapter (EFA) instead of standard enhanced networking?" back="EFA is required for HPC workloads using MPI (Message Passing Interface) or distributed ML training with NCCL. EFA provides OS-bypass networking for ultra-low latency inter-node communication. For standard high-bandwidth EC2 networking, ENA (Enhanced Networking) is sufficient." />
+
+{/* QUIZ
+[
+  {
+    "id": "d3-4-q01",
+    "objective": "3.4 — High-Performing Network Architectures",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company is setting up a CloudFront distribution for their e-commerce application with a custom domain (shop.example.com). They need to enforce HTTPS. Where must the ACM SSL certificate be provisioned?",
+    "options": [
+      { "id": "A", "text": "In the same region as the ALB origin" },
+      { "id": "B", "text": "In us-east-1 (N. Virginia)" },
+      { "id": "C", "text": "In the region closest to the majority of their users" },
+      { "id": "D", "text": "In any region — ACM certificates are automatically replicated globally" }
+    ],
+    "correct": ["B"],
+    "rationale": "CloudFront requires ACM certificates to be provisioned in us-east-1 (N. Virginia), regardless of where the origin or users are located. CloudFront is a global service that reads its certificates from us-east-1. Certificates in any other region will not appear in the CloudFront console for selection.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html",
+    "tags": ["cloudfront", "acm", "ssl", "us-east-1"]
+  },
+  {
+    "id": "d3-4-q02",
+    "objective": "3.4 — High-Performing Network Architectures",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A financial services company runs a real-time trading platform that uses TCP connections (not HTTP). They need low-latency, consistent performance globally and the ability to whitelist two static IP addresses in their firewall. Which AWS service should be used?",
+    "options": [
+      { "id": "A", "text": "Amazon CloudFront with a custom origin" },
+      { "id": "B", "text": "AWS Global Accelerator" },
+      { "id": "C", "text": "Elastic Load Balancing with cross-zone load balancing" },
+      { "id": "D", "text": "Amazon Route 53 with latency-based routing" }
+    ],
+    "correct": ["B"],
+    "rationale": "AWS Global Accelerator provides two static Anycast IP addresses and routes TCP/UDP traffic over the AWS global backbone to the nearest healthy endpoint. It supports non-HTTP protocols (unlike CloudFront), provides static IPs suitable for firewall whitelisting, and offers consistent low-latency global routing. CloudFront is HTTP/HTTPS only with CNAME-based addressing. Route 53 latency routing still routes over the public internet.",
+    "sourceUrl": "https://docs.aws.amazon.com/global-accelerator/latest/dg/what-is-global-accelerator.html",
+    "tags": ["global-accelerator", "static-ip", "tcp", "anycast"]
+  },
+  {
+    "id": "d3-4-q03",
+    "objective": "3.4 — High-Performing Network Architectures",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company has 50 VPCs across multiple AWS accounts and needs full any-to-any connectivity between them, including connectivity to an on-premises data center via Direct Connect. Which solution minimizes connection management complexity?",
+    "options": [
+      { "id": "A", "text": "Create VPC peering connections between all VPCs" },
+      { "id": "B", "text": "Deploy a Transit Gateway and attach all VPCs and the Direct Connect Gateway" },
+      { "id": "C", "text": "Create a hub VPC with peering connections to all other VPCs" },
+      { "id": "D", "text": "Deploy multiple VPN connections from each VPC to the on-premises router" }
+    ],
+    "correct": ["B"],
+    "rationale": "Transit Gateway acts as a centralized hub supporting hub-and-spoke topology. With 50 VPCs, VPC Peering would require 1,225 connections (n*(n-1)/2) and would still be non-transitive. Transit Gateway requires only one attachment per VPC (50 total) and natively integrates with Direct Connect Gateway for on-premises connectivity. A hub VPC with peering still suffers from VPC Peering's non-transitive limitation.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/tgw/what-is-transit-gateway.html",
+    "tags": ["transit-gateway", "vpc-peering", "direct-connect", "hub-and-spoke"]
+  },
+  {
+    "id": "d3-4-q04",
+    "objective": "3.4 — High-Performing Network Architectures",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "EC2 instances in a private subnet need to access Amazon S3 without traversing the internet or requiring a NAT Gateway. Which solution achieves this at no additional cost?",
+    "options": [
+      { "id": "A", "text": "Create an Interface VPC Endpoint for S3" },
+      { "id": "B", "text": "Create a Gateway VPC Endpoint for S3" },
+      { "id": "C", "text": "Create a VPC Peering connection to S3" },
+      { "id": "D", "text": "Assign public IPs to the EC2 instances" }
+    ],
+    "correct": ["B"],
+    "rationale": "A Gateway VPC Endpoint for S3 is free and adds a route to the VPC route table that directs S3 traffic to the endpoint without traversing the internet or NAT Gateway. Interface Endpoints for S3 also exist but are charged per AZ-hour and per-GB. VPC Peering does not apply to AWS managed services. Assigning public IPs would require an internet gateway and expose the instances publicly.",
+    "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-s3.html",
+    "tags": ["vpc-endpoints", "gateway-endpoint", "s3", "private-access"]
+  },
+  {
+    "id": "d3-4-q05",
+    "objective": "3.4 — High-Performing Network Architectures",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company has a dedicated Direct Connect connection to AWS. They need to ensure encrypted traffic between their on-premises data center and their VPC. Direct Connect alone does not encrypt data in transit. What is the recommended solution?",
+    "options": [
+      { "id": "A", "text": "Enable Multi-AZ on the Direct Connect connection for redundancy and encryption" },
+      { "id": "B", "text": "Run a Site-to-Site VPN over the Direct Connect connection using a Transit Gateway" },
+      { "id": "C", "text": "Use HTTPS for all application traffic over Direct Connect" },
+      { "id": "D", "text": "Enable server-side encryption on all S3 buckets and RDS instances" }
+    ],
+    "correct": ["B"],
+    "rationale": "Running a Site-to-Site VPN (IPSec) over the Direct Connect connection provides encryption in transit while maintaining the performance and consistency benefits of Direct Connect. The VPN tunnel's IPSec encryption secures data end-to-end. Multi-AZ on Direct Connect provides redundancy, not encryption. HTTPS encrypts application-layer traffic but does not encrypt all network traffic. Server-side encryption protects data at rest, not in transit over the network.",
+    "sourceUrl": "https://docs.aws.amazon.com/whitepapers/latest/aws-vpc-connectivity-options/aws-direct-connect-vpn.html",
+    "tags": ["direct-connect", "vpn", "encryption", "in-transit"]
+  }
+]
+*/}

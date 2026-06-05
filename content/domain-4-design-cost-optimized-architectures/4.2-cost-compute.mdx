@@ -5,6 +5,417 @@ domain: 4
 weight: "Medium"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 4.2 — Cost-Optimized Compute Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+Compute cost optimization means selecting the right **pricing model** for each workload's lifecycle and usage pattern. AWS On-Demand pricing is the list price — convenient, but up to 4x more expensive than the alternatives for steady-state workloads. By committing to usage (Reserved Instances or Savings Plans) or tolerating interruptions (Spot Instances), organizations routinely achieve 50–90% savings on EC2 costs.
+
+The key insight is that different parts of an application have different characteristics. A three-tier web application might use a combination of: Reserved Instances for the always-on database tier, Savings Plans for the application tier, and Spot Instances for background image processing. Treating every workload the same pricing model is a common source of over-spend.
+
+AWS also provides tools to right-size instances — running a c5.2xlarge at 10% CPU utilization when a c5.large would suffice is wasted spend regardless of the pricing model chosen. AWS Compute Optimizer and Cost Explorer provide machine learning-based recommendations to close this gap.
+
+## Key Components
+
+- **On-Demand Instances** — Pay per second/hour, no commitment, highest unit price
+- **Reserved Instances (RI)** — 1 or 3-year commitment, up to 72% savings; Standard vs Convertible types
+- **Savings Plans** — Commit to $/hour of compute spend; covers EC2, Lambda, and Fargate
+- **Spot Instances** — Spare capacity at up to 90% discount; can be interrupted with 2-minute notice
+- **Spot Fleets / EC2 Fleet** — Mix Spot and On-Demand with automatic capacity maintenance
+- **Dedicated Hosts** — Physical server reservation; supports BYOL licensing
+- **Dedicated Instances** — Hardware isolation without full host control
+- **AWS Compute Optimizer** — ML-based right-sizing recommendations for EC2, Lambda, ECS
+- **AWS Lambda** — Pay per request and GB-second; includes generous free tier
+- **AWS Fargate** — Serverless containers; pay per vCPU and memory per second
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### EC2 Pricing Model Comparison
+
+| Pricing Model | Discount vs On-Demand | Commitment | Best For |
+|---|---|---|---|
+| On-Demand | 0% | None | Unpredictable, short-lived |
+| 1-yr Standard RI | ~40% | 1 year, fixed | Steady-state, known instance type |
+| 3-yr Standard RI | ~60–72% | 3 years, fixed | Long-term, stable workloads |
+| 1-yr Convertible RI | ~31% | 1 year, flexible | Steady-state, may need to change |
+| 3-yr Convertible RI | ~54% | 3 years, flexible | Long-term, platform migrations |
+| Spot Instance | ~60–90% | None (interruptible) | Batch, stateless, fault-tolerant |
+| Compute Savings Plan | ~66% | 1 or 3 years | EC2 + Lambda + Fargate flexibility |
+
+### Reserved Instances — Standard vs Convertible
+
+**Standard RIs** offer the highest discount but lock you into a specific instance type, OS, and tenancy within a region. You cannot change the instance family (e.g., you cannot exchange an m5.large RI for a c5.large). They can be sold on the RI Marketplace if no longer needed.
+
+**Convertible RIs** can be exchanged for another RI of equal or greater value, allowing changes to instance family, OS, and tenancy. This flexibility comes at a cost — discounts are lower (~54% for 3-year vs ~72% for Standard). Convertible RIs cannot be sold on the marketplace.
+
+**Zonal vs Regional RIs**:
+- **Regional RI**: Discount applies to any instance of the matching family in any AZ in the region. Provides a capacity reservation **hint** but not a hard reservation.
+- **Zonal RI**: Discount applies to a specific instance type in a specific AZ. Provides a **hard capacity reservation** — your instance will launch even during capacity events.
+
+### Savings Plans — The Flexible RI Alternative
+
+Savings Plans commit to a minimum hourly spend (e.g., $10/hour) in exchange for discounted rates. AWS applies the discounted rate first, then charges On-Demand for any spend above the commitment.
+
+**Compute Savings Plans** (most flexible):
+- Apply to any EC2 instance family, size, region, OS, and tenancy
+- Also cover AWS Lambda and AWS Fargate usage
+- Up to ~66% savings vs On-Demand
+
+**EC2 Instance Savings Plans** (highest discount):
+- Apply to a specific instance family within a region (e.g., all m5 instances in us-east-1)
+- Up to ~72% savings — matching Standard RI discounts with more flexibility within the family
+- Does not cover Lambda or Fargate
+
+**When to use Savings Plans vs RIs**:
+- Use Savings Plans when you're not sure which instance types you'll need but know your overall compute spend level
+- Use Standard RIs when you have very stable, predictable workloads and want maximum discount
+- Use Convertible RIs when you expect to migrate instance families during the commitment period
+
+### Spot Instances — Deep Dive
+
+Spot Instances use spare EC2 capacity sold at dynamic prices up to 90% below On-Demand. When AWS needs the capacity back, it sends a **2-minute interruption notice** via instance metadata and the EC2 events API. The instance is then terminated (or stopped/hibernated if configured).
+
+**Fault-tolerant use cases**:
+- Batch processing (Spark, Hadoop, video encoding)
+- HPC / scientific simulations (can checkpoint)
+- Stateless web tier behind a load balancer
+- CI/CD build agents
+- Machine learning training (with checkpointing)
+
+**Spot Fleet / EC2 Fleet**:
+- Specify a target capacity and a mix of instance types/sizes
+- The fleet automatically diversifies across multiple instance pools (e.g., m5.large, m5.xlarge, m4.large in multiple AZs) to reduce interruption probability
+- Maintains capacity by replacing interrupted instances from other pools
+- Supports mixed pricing strategies: `lowest-price`, `diversified`, `capacity-optimized`
+
+**Spot Instance best practices**:
+- Diversify across multiple instance types and AZs — no single pool depletes simultaneously
+- Use the Spot Instance Advisor to identify pools with <5% interruption frequency
+- Use EC2 hibernation for stateful Spot workloads where possible
+- Design for graceful shutdown when the 2-minute notice arrives
+
+### Dedicated Hosts vs Dedicated Instances
+
+**Dedicated Instances**: Your EC2 instances run on hardware dedicated to your account, but AWS manages host placement. Billed per instance with a $2/hr per-region fee. Useful for compliance requirements that require hardware isolation but don't need license management.
+
+**Dedicated Hosts**: You pay for an entire physical server (e.g., $1.499/hr for an m5 24xlarge host). You control instance placement on that host. Critically, Dedicated Hosts allow **Bring Your Own License (BYOL)** for software with per-socket or per-core licensing (Windows Server, SQL Server, Oracle). Without BYOL, running SQL Server Enterprise on EC2 could cost $30,000+/year in license fees — a Dedicated Host allows using on-premises licenses.
+
+### AWS Lambda Cost Model
+
+Lambda charges on two dimensions:
+- **Request charge**: $0.20 per 1 million requests (first 1M/month free)
+- **Duration charge**: $0.0000166667 per GB-second (first 400,000 GB-seconds/month free)
+
+Example: A function using 512 MB of memory running for 100ms:
+- Memory allocation = 0.5 GB × 0.1 sec = 0.05 GB-seconds per invocation
+- At 10 million invocations/month: 500,000 GB-seconds × $0.0000166667 = $8.33/month for duration + $1.80 for requests = ~$10/month
+
+Lambda cost optimization tips:
+- Right-size memory — Lambda allocates CPU proportionally to memory. A function that's CPU-bound may run faster with more memory, reducing duration cost
+- Use Lambda Power Tuning (open-source) to find the optimal memory setting
+- Use reserved concurrency to cap cost exposure
+- Prefer event-driven invocations over polling patterns
+
+### AWS Fargate Pricing
+
+Fargate charges per second for vCPU and memory allocated to tasks:
+- vCPU: $0.04048/vCPU/hour
+- Memory: $0.004445/GB/hour
+
+A task with 1 vCPU and 2 GB memory running continuously = $0.04048 + (2 × $0.004445) = $0.04937/hour = ~$36/month. Compare to an EC2 On-Demand m5.large ($0.096/hour = ~$70/month) — Fargate can be cost-effective for variable-load containerized workloads.
+
+### AWS Compute Optimizer
+
+Compute Optimizer analyzes CloudWatch utilization metrics (CPU, memory via CloudWatch Agent, network, disk I/O) and uses ML models to recommend:
+- Instance type right-sizing for EC2 (e.g., downsize c5.4xlarge to c5.xlarge)
+- Lambda memory right-sizing
+- ECS Fargate task size adjustments
+- Auto Scaling group configuration improvements
+
+Compute Optimizer is free, but requires CloudWatch Agent for memory metrics. It surfaces findings in the console and can export recommendations to S3.
+
+## Decision Flow
+
+### Which EC2 pricing model?
+
+```
+Is the workload interruptible / fault-tolerant?
+  YES → Spot Instance (90% savings)
+  NO → Continue
+
+Will the workload run >1 year with stable requirements?
+  YES → Standard RI or EC2 Instance Savings Plan
+  NO → Continue
+
+Will you likely change instance families or regions?
+  YES → Compute Savings Plan or Convertible RI
+  NO → Continue
+
+Short-term or unpredictable start date?
+  → On-Demand
+```
+
+### Spot vs Reserved for mixed workloads
+
+For an Auto Scaling group serving web traffic:
+- **Base capacity** (minimum healthy instances): Reserved Instances or Savings Plans
+- **Peak/burst capacity**: Spot Instances via mixed instances policy
+- This pattern achieves 40–70% overall savings while maintaining availability
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### View and Compare EC2 Pricing Models (CLI)
+
+```bash
+# Get On-Demand pricing for m5.large in us-east-1 (Linux)
+aws pricing get-products \
+  --service-code AmazonEC2 \
+  --filters \
+    Type=TERM_MATCH,Field=instanceType,Value=m5.large \
+    Type=TERM_MATCH,Field=operatingSystem,Value=Linux \
+    Type=TERM_MATCH,Field=location,Value="US East (N. Virginia)" \
+    Type=TERM_MATCH,Field=tenancy,Value=Shared \
+    Type=TERM_MATCH,Field=preInstalledSw,Value=NA \
+  --region us-east-1 \
+  --output json | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(json.loads(list(d['PriceList'])[0]), indent=2))" | grep -A 2 '"USD"'
+```
+
+### Launch a Spot Instance with Interruption Handling
+
+```bash
+# Request a Spot Instance (on-demand-like request, no spot price bid needed post-2017)
+aws ec2 run-instances \
+  --image-id ami-0abcdef1234567890 \
+  --instance-type m5.large \
+  --key-name my-key-pair \
+  --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","InstanceInterruptionBehavior":"terminate"}}' \
+  --count 1 \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=spot-batch-worker}]'
+
+# Check Spot Instance interruption notice from within the instance
+# (poll this endpoint every 5 seconds in your application)
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/spot/instance-action
+# Returns 404 when no interruption pending, {"action":"terminate","time":"..."} when interrupted
+```
+
+### Create a Spot Fleet with Diversified Strategy
+
+```bash
+cat > spot-fleet-config.json << 'EOF'
+{
+  "TargetCapacity": 10,
+  "IamFleetRole": "arn:aws:iam::123456789012:role/aws-ec2-spot-fleet-tagging-role",
+  "AllocationStrategy": "diversified",
+  "LaunchSpecifications": [
+    {
+      "ImageId": "ami-0abcdef1234567890",
+      "InstanceType": "m5.large",
+      "SubnetId": "subnet-0a1b2c3d"
+    },
+    {
+      "ImageId": "ami-0abcdef1234567890",
+      "InstanceType": "m5.xlarge",
+      "SubnetId": "subnet-0a1b2c3d"
+    },
+    {
+      "ImageId": "ami-0abcdef1234567890",
+      "InstanceType": "m4.large",
+      "SubnetId": "subnet-0e4f5g6h"
+    }
+  ]
+}
+EOF
+
+aws ec2 request-spot-fleet \
+  --spot-fleet-request-config file://spot-fleet-config.json
+```
+
+### Create an Auto Scaling Group with Mixed Instances (Spot + On-Demand)
+
+```bash
+# Create launch template first
+aws ec2 create-launch-template \
+  --launch-template-name my-mixed-lt \
+  --version-description "v1" \
+  --launch-template-data '{
+    "ImageId": "ami-0abcdef1234567890",
+    "InstanceType": "m5.large"
+  }'
+
+# Create ASG with mixed instances policy: 20% On-Demand base + 80% Spot
+aws autoscaling create-auto-scaling-group \
+  --auto-scaling-group-name my-cost-optimized-asg \
+  --min-size 2 \
+  --max-size 20 \
+  --desired-capacity 4 \
+  --vpc-zone-identifier "subnet-0a1b2c3d,subnet-0e4f5g6h" \
+  --mixed-instances-policy '{
+    "LaunchTemplate": {
+      "LaunchTemplateSpecification": {
+        "LaunchTemplateName": "my-mixed-lt",
+        "Version": "$Latest"
+      },
+      "Overrides": [
+        {"InstanceType": "m5.large"},
+        {"InstanceType": "m5.xlarge"},
+        {"InstanceType": "m4.large"}
+      ]
+    },
+    "InstancesDistribution": {
+      "OnDemandBaseCapacity": 1,
+      "OnDemandPercentageAboveBaseCapacity": 20,
+      "SpotAllocationStrategy": "capacity-optimized"
+    }
+  }'
+```
+
+### View Compute Optimizer Recommendations
+
+```bash
+# Get EC2 instance right-sizing recommendations
+aws compute-optimizer get-ec2-instance-recommendations \
+  --query 'instanceRecommendations[*].{
+    Instance:instanceArn,
+    Finding:finding,
+    RecommendedType:recommendationOptions[0].instanceType,
+    SavingsPercent:recommendationOptions[0].estimatedMonthlySavings.percentage
+  }' \
+  --output table
+
+# Get Lambda function recommendations
+aws compute-optimizer get-lambda-function-recommendations \
+  --query 'lambdaFunctionRecommendations[*].{
+    Function:functionArn,
+    Finding:finding,
+    CurrentMemory:currentMemorySize,
+    RecommendedMemory:memorySizeRecommendationOptions[0].memorySize
+  }' \
+  --output table
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Spot for interruptible workloads**: The exam consistently rewards Spot for batch processing, big data, CI/CD, and stateless web tiers. The key criterion is that the workload can tolerate the 2-minute interruption notice and either checkpoint progress or restart from scratch.
+- **Standard RI vs Convertible RI trade-off**: Standard gives higher discount but zero flexibility. Convertible can be exchanged if instance families change. If a scenario mentions a company planning a migration or technology refresh within the commitment period, Convertible RI or Compute Savings Plans are more appropriate.
+- **Savings Plans flexibility**: Compute Savings Plans cover EC2, Lambda, and Fargate with flexible instance family/region coverage. If the question asks about a commitment that works across multiple compute types, Savings Plans is the answer.
+- **Dedicated Host BYOL**: When a scenario mentions "bring your own license" for Windows Server, SQL Server, or Oracle, the answer involves Dedicated Hosts (not Dedicated Instances, which don't support BYOL).
+- **Spot Fleet diversification**: Spot Fleet with the `diversified` or `capacity-optimized` strategy across multiple instance types and AZs is the recommended pattern to minimize interruption risk.
+
+## Common Traps
+
+- **Standard RI inflexibility**: A company that purchases Standard RIs and then decides to migrate from m5 to c5 instances cannot apply the existing RIs to c5. They must sell them on the marketplace or wait for expiry. Convertible RIs would have been the right choice.
+- **Savings Plans don't provide capacity reservation**: Unlike Zonal RIs, Savings Plans provide a pricing discount but do not guarantee instance capacity during high-demand events (e.g., regional capacity crunch). Zonal RIs are needed when capacity reservation is required.
+- **Lambda free tier is per account, not per function**: The 1M requests and 400,000 GB-seconds free tier apply across all Lambda functions in the account, not per function. An architecture relying on multiple heavily-used Lambda functions cannot assume each has its own free tier.
+</ExamAngle>
+
+<Flashcard front="What is the maximum discount available from Spot Instances and what is the trade-off?" back="Up to 90% discount vs On-Demand pricing. Trade-off: AWS can reclaim the instance with only a 2-minute notice. Spot Instances are only suitable for interruptible, fault-tolerant workloads." />
+<Flashcard front="What is the difference between Standard RI and Convertible RI?" back="Standard RI: up to 72% discount, cannot change instance family, can be sold on RI Marketplace. Convertible RI: ~54% discount (3-year), can be exchanged for different instance family/OS/tenancy, cannot be sold on Marketplace." />
+<Flashcard front="When should you use Dedicated Hosts instead of Dedicated Instances?" back="When you need to Bring Your Own License (BYOL) for per-socket or per-core licensed software like Windows Server, SQL Server, or Oracle. Dedicated Instances provide hardware isolation but do not allow BYOL." />
+<Flashcard front="What does a Compute Savings Plan cover that an EC2 Instance Savings Plan does not?" back="Compute Savings Plans cover EC2 (any family, any region), AWS Lambda, and AWS Fargate. EC2 Instance Savings Plans only cover a specific EC2 instance family within a specific region." />
+<Flashcard front="What is the 2-minute Spot interruption notice and how should applications handle it?" back="AWS sends an interruption notice via instance metadata (http://169.254.169.254/latest/meta-data/spot/instance-action) two minutes before terminating a Spot Instance. Applications should poll this endpoint and trigger graceful shutdown: checkpoint state, drain connections, dequeue in-progress work items." />
+
+{/* QUIZ
+[
+  {
+    "id": "d4-2-q01",
+    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company runs a genomics research pipeline that processes large datasets overnight. Jobs take 4–8 hours to complete and can be restarted from a checkpoint file saved to S3 every 30 minutes if interrupted. The pipeline runs 5 nights per week with variable compute needs (50–200 instances). Which pricing strategy achieves the maximum cost savings?",
+    "options": [
+      { "id": "A", "text": "Reserved Instances (3-year, Standard) for all instances" },
+      { "id": "B", "text": "On-Demand Instances to ensure availability" },
+      { "id": "C", "text": "Spot Fleet with diversified strategy across multiple instance types and AZs" },
+      { "id": "D", "text": "Dedicated Hosts to ensure consistent performance" }
+    ],
+    "correct": ["C"],
+    "rationale": "The workload is interruptible (it checkpoints every 30 minutes) and runs intermittently (5 nights/week), making it an ideal Spot candidate. Spot Fleet with diversified strategy minimizes interruption risk by spreading across multiple instance pools. Savings of up to 90% vs On-Demand. Reserved Instances (A) are inefficient for workloads that run only 5 nights/week — you pay for 24/7 capacity you don't use. On-Demand (B) provides availability but at full cost. Dedicated Hosts (D) are the most expensive option and provide no benefit here.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-fleet.html",
+    "tags": ["spot", "spot-fleet", "cost", "batch"]
+  },
+  {
+    "id": "d4-2-q02",
+    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company runs three web application tiers on EC2. They know they will need at least 10 m5.large instances running continuously for the next 3 years. However, they plan to evaluate newer-generation instance types (m6i, c6i) after 18 months. Which purchasing option provides the best balance of cost savings and flexibility?",
+    "options": [
+      { "id": "A", "text": "3-year Standard Reserved Instances for m5.large" },
+      { "id": "B", "text": "3-year Convertible Reserved Instances" },
+      { "id": "C", "text": "1-year Standard Reserved Instances, then re-evaluate" },
+      { "id": "D", "text": "On-Demand Instances for maximum flexibility" }
+    ],
+    "correct": ["B"],
+    "rationale": "Convertible RIs allow exchanging to different instance families, so when the company evaluates m6i or c6i at 18 months, they can exchange their Convertible RIs to the new instance type. Standard RIs (A) cannot be exchanged to a different family — they would be stuck with m5.large or must sell on the marketplace. 1-year Standard RIs (C) provides less total discount and requires re-purchasing. On-Demand (D) at full price over 3 years would cost significantly more.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/reserved-instances-types.html",
+    "tags": ["reserved-instances", "convertible", "cost", "flexibility"]
+  },
+  {
+    "id": "d4-2-q03",
+    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company has an existing fleet of EC2 instances across multiple families (m5, c5, r5) spread across us-east-1 and us-west-2. They want to commit to discounted pricing but expect to shift workloads between regions and instance families as they optimize. They also run significant Lambda workloads. Which commitment option provides maximum flexibility?",
+    "options": [
+      { "id": "A", "text": "Standard Reserved Instances in each region for each instance family" },
+      { "id": "B", "text": "EC2 Instance Savings Plans for each instance family" },
+      { "id": "C", "text": "Compute Savings Plans" },
+      { "id": "D", "text": "Convertible Reserved Instances in each region" }
+    ],
+    "correct": ["C"],
+    "rationale": "Compute Savings Plans apply automatically to any EC2 instance family, size, region, OS, and tenancy — and also cover Lambda and Fargate. This covers their multi-region, multi-family EC2 fleet AND their Lambda workloads under a single commitment. Standard RIs (A) are locked to specific families/regions. EC2 Instance Savings Plans (B) are locked to a specific family within a region and don't cover Lambda. Convertible RIs (D) can be exchanged but are complex to manage across multiple regions and don't cover Lambda.",
+    "sourceUrl": "https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html",
+    "tags": ["savings-plans", "cost", "flexibility", "lambda"]
+  },
+  {
+    "id": "d4-2-q04",
+    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A financial services company needs to run SQL Server Enterprise on EC2. They already have SQL Server Enterprise licenses purchased through their on-premises Volume Licensing agreement. How should they deploy to minimize licensing costs on AWS?",
+    "options": [
+      { "id": "A", "text": "Use EC2 Dedicated Instances with Windows AMI that includes SQL Server" },
+      { "id": "B", "text": "Use EC2 Dedicated Hosts and bring their existing SQL Server licenses (BYOL)" },
+      { "id": "C", "text": "Use RDS for SQL Server with License Included to simplify management" },
+      { "id": "D", "text": "Use EC2 On-Demand instances and purchase new AWS SQL Server licenses" }
+    ],
+    "correct": ["B"],
+    "rationale": "Dedicated Hosts allow Bring Your Own License (BYOL) for per-socket/per-core licensed software like SQL Server Enterprise. By using Dedicated Hosts, the company can apply their existing on-premises SQL Server Enterprise licenses, eliminating the need to pay AWS for SQL Server licensing (which can cost $30,000+/year). Dedicated Instances (A) do not support BYOL. RDS License Included (C) would incur new license costs on top of the instance cost, wasting their existing licenses. On-Demand with new licenses (D) is the most expensive option.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/dedicated-hosts-overview.html",
+    "tags": ["dedicated-hosts", "byol", "windows", "sql-server", "cost"]
+  },
+  {
+    "id": "d4-2-q05",
+    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "domain": 4,
+    "difficulty": "easy",
+    "type": "single",
+    "stem": "A development team's Lambda function processes image thumbnails. AWS Compute Optimizer reports the function is consistently using only 30% of its allocated 1,024 MB memory. What action reduces cost with no impact on functionality?",
+    "options": [
+      { "id": "A", "text": "Switch to a Provisioned Concurrency configuration" },
+      { "id": "B", "text": "Reduce the Lambda function memory allocation to match actual usage" },
+      { "id": "C", "text": "Move the function to EC2 On-Demand for better cost control" },
+      { "id": "D", "text": "Reserve concurrency to limit the number of simultaneous invocations" }
+    ],
+    "correct": ["B"],
+    "rationale": "Lambda charges based on GB-seconds: memory allocation × duration. If the function only uses 30% of 1,024 MB, reducing memory to ~320 MB (or testing with 512 MB as a safe buffer) would reduce the GB-second charge by ~50% with no functional impact. Provisioned Concurrency (A) adds cost for pre-warming and is irrelevant here. Moving to EC2 (C) would be more expensive and complex. Reserved concurrency (D) limits throughput but doesn't reduce per-invocation cost.",
+    "sourceUrl": "https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html",
+    "tags": ["lambda", "compute-optimizer", "cost", "right-sizing"]
+  }
+]
+*/}

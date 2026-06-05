@@ -5,6 +5,341 @@ domain: 3
 weight: "High"
 ---
 
+import { Concept, DeepDive, Lab, ExamAngle, Flashcard } from '@/components/mdx';
+
 # 3.1 — High-Performing Storage Solutions
 
-> Content coming soon.
+<Concept>
+## What Is It?
+
+AWS offers a spectrum of storage services engineered for different performance profiles, durability requirements, and access patterns. Choosing the right storage tier is critical: using S3 Standard when Glacier Deep Archive would suffice inflates cost; using sc1 EBS when io2 is needed degrades application throughput. High-performing architectures match the storage service to the workload's latency sensitivity, I/O pattern, sharing requirements, and retention lifecycle.
+
+Storage in AWS falls into three fundamental categories: **object storage** (Amazon S3 — internet-accessible, virtually unlimited, ideal for unstructured data and static assets), **block storage** (Amazon EBS — low-latency volumes attached to EC2 instances, behave like raw disk), and **file storage** (Amazon EFS, FSx — shared POSIX or Windows file systems accessible from multiple instances simultaneously). A fourth operational category, **hybrid storage**, is served by AWS Storage Gateway, which bridges on-premises infrastructure with AWS cloud storage.
+
+Selecting high-performing storage requires evaluating five dimensions: **throughput** (MB/s sustained), **IOPS** (random I/O operations per second), **latency** (microseconds to milliseconds), **durability** (eleven nines for S3 vs. instance store ephemeral), and **access model** (single instance, multi-instance, or anonymous internet). Getting any of these wrong creates a bottleneck that no amount of compute scaling will fix.
+
+## Key Components
+
+- **Amazon S3** — Object storage with storage classes for cost-tiered access (Standard → Intelligent-Tiering → Standard-IA → One Zone-IA → Glacier Instant Retrieval → Glacier Flexible Retrieval → Glacier Deep Archive)
+- **Amazon EBS** — Persistent block volumes: gp3, gp2, io2 Block Express (SSD); st1, sc1 (HDD)
+- **Amazon EFS** — Fully managed NFS file system with bursting, provisioned, and elastic throughput modes
+- **Amazon FSx for Windows File Server** — Managed SMB/NTFS file system for Windows workloads
+- **Amazon FSx for Lustre** — High-performance parallel file system for HPC and ML training workloads
+- **AWS Storage Gateway** — Hybrid bridge: File Gateway (NFS/SMB to S3), Volume Gateway (iSCSI block), Tape Gateway (VTL)
+</Concept>
+
+<DeepDive>
+## How It Works
+
+### Amazon S3 — Storage Classes and Performance
+
+S3 organizes data into **buckets** (global namespace) and **objects** (key-value pairs up to 5 TB each). Performance is scoped to **prefixes** — S3 scales automatically to **3,500 PUT/COPY/POST/DELETE** and **5,500 GET/HEAD** requests per second per prefix. A prefix is everything in the key before the final object name segment. Adding prefix diversity (e.g., `images/2024/01/`, `images/2024/02/`) multiplies these limits multiplicatively.
+
+**Storage Classes** (ordered by access frequency and cost):
+
+| Class | Min Storage | Retrieval | Use Case |
+|-------|-------------|-----------|----------|
+| S3 Standard | None | Immediate | Frequently accessed data |
+| S3 Intelligent-Tiering | None | Immediate | Unknown or changing patterns |
+| S3 Standard-IA | 30 days | Immediate | Infrequent, but rapid retrieval |
+| S3 One Zone-IA | 30 days | Immediate | Infrequent, non-critical, single AZ |
+| S3 Glacier Instant Retrieval | 90 days | Milliseconds | Archives with occasional instant access |
+| S3 Glacier Flexible Retrieval | 90 days | Minutes–hours | Long-term archives |
+| S3 Glacier Deep Archive | 180 days | 12–48 hours | Compliance vaults, rarely accessed |
+
+**Intelligent-Tiering** monitors access patterns and moves objects between a frequent-access tier and an infrequent-access tier automatically — no retrieval fees, but a small per-object monitoring charge applies.
+
+**S3 Performance Features:**
+
+- **Multipart Upload**: Splits large objects into parts uploaded in parallel. *Required* for objects > 5 GB; *recommended* for objects > 100 MB. Improves throughput and allows resuming failed uploads.
+- **S3 Transfer Acceleration**: Routes PUT requests through the nearest CloudFront edge location, then traverses AWS backbone to the destination bucket. Effective for cross-continental uploads. *Note: Transfer Acceleration accelerates uploads, not downloads.*
+- **Byte-Range Fetches**: Parallel GETs of different byte ranges of the same object. Speeds up large downloads and enables partial retrieval (e.g., reading only the header of a Parquet file).
+- **S3 Select**: Server-side filtering using SQL expressions — retrieves only needed columns/rows from CSV, JSON, or Parquet objects. Reduces data transfer and client-side processing dramatically.
+
+### Amazon EBS — Block Volume Types
+
+EBS volumes attach to a single EC2 instance at a time (Multi-Attach is available for io1/io2 on Nitro instances for cluster filesystems). Performance characteristics:
+
+| Volume Type | Max IOPS | Max Throughput | Use Case |
+|-------------|----------|----------------|----------|
+| gp3 (SSD) | 16,000 | 1,000 MB/s | General purpose — IOPS and throughput configurable independently |
+| gp2 (SSD) | 16,000 | 250 MB/s | Legacy general purpose — IOPS tied to size (3 IOPS/GB) |
+| io2 Block Express (SSD) | 256,000 | 4,000 MB/s | I/O-intensive: large OLTP, SAP HANA |
+| st1 (HDD) | 500 | 500 MB/s | Sequential: big data, log processing (cannot be boot volume) |
+| sc1 (HDD) | 250 | 250 MB/s | Cold data, infrequent access (cannot be boot volume) |
+
+**gp3 vs gp2**: gp3 is the successor. With gp3 you independently set IOPS (baseline 3,000, max 16,000) and throughput (baseline 125 MB/s, max 1,000 MB/s) regardless of volume size. gp2 bundles IOPS to size at 3 IOPS/GB, capping throughput at 250 MB/s. gp3 is also cheaper per GB than gp2. Always prefer gp3 for new workloads.
+
+**io2 Block Express**: Designed for sub-millisecond latency and up to 256,000 IOPS. Supports Multi-Attach for up to 16 Nitro-based instances simultaneously — enabling shared-disk clustering (OCFS2, Oracle RAC).
+
+### Amazon EFS — Elastic File System
+
+EFS provides a shared NFS v4.1/4.2 file system accessible from thousands of EC2 instances, Lambda functions, and ECS tasks concurrently across multiple AZs.
+
+**Performance Modes:**
+- **General Purpose** (default): Lower latency, suitable for latency-sensitive applications (web serving, content management). Recommended for most workloads.
+- **Max I/O**: Higher aggregate throughput and IOPS but slightly higher latency. For massively parallel workloads (big data analytics, media processing) with thousands of clients.
+
+**Throughput Modes:**
+- **Bursting**: Baseline throughput scales with file system size (50 KB/s per GB); burst credit system allows bursts up to 100 MB/s (or higher for large file systems). Cost included in storage price.
+- **Provisioned**: Set a fixed throughput independent of storage size. Pay for provisioned throughput above what bursting would provide.
+- **Elastic** (recommended for new workloads): Automatically scales up to 3 GB/s read / 1 GB/s write. Pay only for I/O used. Best for spiky, unpredictable access patterns — no capacity planning needed.
+
+### Amazon FSx
+
+**FSx for Windows File Server**: Managed SMB (CIFS) file shares with full NTFS semantics, Windows ACLs, DFS Namespaces, shadow copies. Integrates with Microsoft Active Directory. Supports SSD and HDD storage options and Multi-AZ deployments for HA.
+
+**FSx for Lustre**: Open-source Lustre parallel file system managed by AWS. Delivers sub-millisecond latencies and hundreds of GB/s aggregate throughput. Two deployment options: **Scratch** (temporary, no data replication — for short jobs) and **Persistent** (replicated, for long-running workloads). Can be **linked to S3 buckets** — objects lazily loaded on first access, results written back to S3 automatically. Key for HPC and ML training pipelines that need to treat S3 as a data lake while accessing files at disk speed.
+
+### AWS Storage Gateway
+
+| Gateway Type | Protocol | Backs To | Use Case |
+|--------------|----------|----------|----------|
+| File Gateway | NFS, SMB | S3 buckets | On-premises file shares archived to S3 |
+| Volume Gateway (Stored) | iSCSI | S3 + local | Primary data on-prem, async backup to S3 |
+| Volume Gateway (Cached) | iSCSI | S3 primary | Primary in S3, hot cache on-prem |
+| Tape Gateway | iSCSI VTL | S3 / Glacier | Replace physical tape libraries |
+
+## Decision Flow
+
+```
+Need shared access from multiple instances?
+  YES → Is it Windows/SMB?  → FSx for Windows
+        Is it Linux/NFS?    → EFS
+        Is it HPC/parallel? → FSx for Lustre
+  NO  → Is it block I/O?    → EBS (gp3 for general, io2 for high IOPS)
+        Is it object/file?  → S3 (choose class by access frequency)
+        Is it ephemeral?    → Instance Store (EC2 local NVMe)
+
+S3 class selection:
+  Frequent access → Standard
+  Unknown pattern → Intelligent-Tiering
+  Infrequent, need ms retrieval → Standard-IA or Glacier Instant Retrieval
+  Archive, rare access → Glacier Flexible or Deep Archive
+
+EBS type selection:
+  Boot volumes, general workloads → gp3
+  High IOPS databases (>16K IOPS) → io2 Block Express
+  Sequential big data → st1
+  Cold infrequent data → sc1
+```
+</DeepDive>
+
+<Lab>
+## Hands-On
+
+### Enable S3 Multipart Upload with AWS CLI
+
+```bash
+# Upload a large file using multipart (automatic for files > threshold)
+aws s3 cp large-dataset.tar.gz s3://my-bucket/datasets/ \
+  --storage-class INTELLIGENT_TIERING
+
+# Manually initiate multipart upload
+UPLOAD_ID=$(aws s3api create-multipart-upload \
+  --bucket my-bucket \
+  --key datasets/large-dataset.tar.gz \
+  --query 'UploadId' --output text)
+
+# Upload parts (each part min 5MB except last)
+aws s3api upload-part \
+  --bucket my-bucket \
+  --key datasets/large-dataset.tar.gz \
+  --part-number 1 \
+  --upload-id $UPLOAD_ID \
+  --body part1.bin
+
+# Complete multipart upload (requires ETag from each part)
+aws s3api complete-multipart-upload \
+  --bucket my-bucket \
+  --key datasets/large-dataset.tar.gz \
+  --upload-id $UPLOAD_ID \
+  --multipart-upload '{"Parts":[{"PartNumber":1,"ETag":"\"etag-here\""}]}'
+```
+
+### Enable S3 Transfer Acceleration
+
+```bash
+# Enable Transfer Acceleration on the bucket
+aws s3api put-bucket-accelerate-configuration \
+  --bucket my-bucket \
+  --accelerate-configuration Status=Enabled
+
+# Check the acceleration endpoint
+# Upload using accelerate endpoint
+aws s3 cp localfile.zip s3://my-bucket/ \
+  --endpoint-url https://my-bucket.s3-accelerate.amazonaws.com
+```
+
+### Create a gp3 EBS Volume with Custom IOPS/Throughput
+
+```bash
+# Create a gp3 volume: 100GB, 6000 IOPS, 250 MB/s throughput
+aws ec2 create-volume \
+  --availability-zone us-east-1a \
+  --volume-type gp3 \
+  --size 100 \
+  --iops 6000 \
+  --throughput 250
+
+# Attach to an instance
+aws ec2 attach-volume \
+  --volume-id vol-0abcd1234efgh5678 \
+  --instance-id i-0123456789abcdef0 \
+  --device /dev/xvdf
+```
+
+### Create an EFS File System with Elastic Throughput
+
+```bash
+# Create EFS file system
+FS_ID=$(aws efs create-file-system \
+  --performance-mode generalPurpose \
+  --throughput-mode elastic \
+  --encrypted \
+  --tags Key=Name,Value=MyElasticEFS \
+  --query 'FileSystemId' --output text)
+
+echo "Created EFS: $FS_ID"
+
+# Create a mount target in subnet
+aws efs create-mount-target \
+  --file-system-id $FS_ID \
+  --subnet-id subnet-0abc123 \
+  --security-groups sg-0xyz789
+
+# Mount on EC2 (requires amazon-efs-utils installed)
+sudo mount -t efs -o tls $FS_ID:/ /mnt/efs
+```
+
+### Use S3 Select to Filter CSV Data
+
+```bash
+# Query only specific columns from a CSV in S3
+aws s3api select-object-content \
+  --bucket my-bucket \
+  --key data/sales-2024.csv \
+  --expression "SELECT s.region, s.amount FROM S3Object s WHERE s.amount > '10000'" \
+  --expression-type SQL \
+  --input-serialization '{"CSV": {"FileHeaderInfo": "USE"}}' \
+  --output-serialization '{"CSV": {}}' \
+  output.csv
+```
+</Lab>
+
+<ExamAngle>
+## What the Exam Tests
+
+- **Multipart upload thresholds**: Required for objects **larger than 5 GB**; recommended (best practice) for objects **larger than 100 MB**. Scenarios about large file upload failures or performance should trigger multipart upload consideration.
+- **gp3 independence**: gp3 allows IOPS (up to 16,000) and throughput (up to 1,000 MB/s) to be configured **independently of volume size**. gp2 ties IOPS to size (3 IOPS/GB). A question asking how to increase IOPS without increasing volume size points to gp3.
+- **EFS Elastic throughput**: Best for unpredictable or spiky workloads — auto-scales, pay-per-use. Bursting is cost-effective for steady or low traffic; Provisioned is for consistently high throughput needs.
+- **FSx for Lustre + S3 integration**: FSx for Lustre can be linked to an S3 bucket, enabling HPC workloads to read/write S3 objects as files at high speed. This is the canonical answer for "ML training on large S3 datasets with low-latency file access."
+- **Transfer Acceleration vs CloudFront**: Transfer Acceleration uses CloudFront edge for **uploads** (PUT). CloudFront caches content for **downloads** (GET). Do not confuse their directions.
+
+## Common Traps
+
+- **S3 Transfer Acceleration is not for downloads**: The exam may describe a scenario where users globally need fast downloads — that calls for CloudFront, not Transfer Acceleration. Transfer Acceleration accelerates uploads to S3.
+- **One Zone-IA loses data if the AZ fails**: It stores data in a single AZ only. It is NOT suitable for primary backups or data that cannot be recreated. Only use for data that can be re-derived or that exists elsewhere.
+- **EBS Multi-Attach ≠ shared filesystem**: io2 Multi-Attach allows multiple instances to attach the same EBS volume, but the application layer (e.g., OCFS2, Oracle RAC) must manage concurrent writes. It is not a general-purpose shared filesystem like EFS.
+</ExamAngle>
+
+<Flashcard front="What is the S3 per-prefix request rate limit?" back="3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD requests per second per prefix. Adding more prefixes multiplies throughput linearly." />
+<Flashcard front="When is S3 multipart upload required vs recommended?" back="Required for objects > 5 GB. Recommended (best practice) for objects > 100 MB for improved throughput and upload resilience." />
+<Flashcard front="How does gp3 differ from gp2 for EBS?" back="gp3 allows independent configuration of IOPS (up to 16,000) and throughput (up to 1,000 MB/s) regardless of volume size. gp2 ties IOPS to size at 3 IOPS/GB with a max throughput of 250 MB/s. gp3 is also cheaper per GB." />
+<Flashcard front="What EFS throughput mode auto-scales and charges per I/O?" back="Elastic throughput mode — scales up to 3 GB/s reads / 1 GB/s writes automatically, billed per GB of data transferred. Best for unpredictable workloads." />
+<Flashcard front="How does FSx for Lustre integrate with S3 for HPC?" back="FSx for Lustre can be linked to an S3 bucket. Objects are lazily loaded on first access and results written back to S3, enabling HPC jobs to access S3 data at sub-millisecond Lustre speeds." />
+
+{/* QUIZ
+[
+  {
+    "id": "d3-1-q01",
+    "objective": "3.1 — High-Performing Storage Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A company needs to upload 50 GB video files from offices in Europe to an S3 bucket located in us-east-1. Users report slow upload speeds. Which S3 feature should be enabled to improve upload performance?",
+    "options": [
+      { "id": "A", "text": "S3 Cross-Region Replication" },
+      { "id": "B", "text": "S3 Transfer Acceleration" },
+      { "id": "C", "text": "Amazon CloudFront distribution" },
+      { "id": "D", "text": "S3 Byte-Range Fetches" }
+    ],
+    "correct": ["B"],
+    "rationale": "S3 Transfer Acceleration routes upload traffic through the nearest CloudFront edge location and then over AWS's optimized backbone network to the destination bucket, significantly improving upload speed for cross-continental transfers. CloudFront accelerates downloads, not uploads. Byte-Range Fetches speed up downloads. CRR copies data between buckets but does not accelerate uploads.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/transfer-acceleration.html",
+    "tags": ["s3", "transfer-acceleration", "performance"]
+  },
+  {
+    "id": "d3-1-q02",
+    "objective": "3.1 — High-Performing Storage Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A database server requires an EBS volume with 8,000 IOPS and 500 MB/s throughput. The volume is currently gp2 and only 50 GB in size. What is the most cost-effective solution?",
+    "options": [
+      { "id": "A", "text": "Increase the gp2 volume size to 2,667 GB to achieve 8,000 IOPS" },
+      { "id": "B", "text": "Change the volume type to gp3 and configure 8,000 IOPS and 500 MB/s independently" },
+      { "id": "C", "text": "Change the volume type to io2 and set 8,000 IOPS" },
+      { "id": "D", "text": "Create an st1 volume and stripe multiple volumes with RAID 0" }
+    ],
+    "correct": ["B"],
+    "rationale": "gp3 allows IOPS (up to 16,000) and throughput (up to 1,000 MB/s) to be set independently of volume size. This avoids the need to inflate the gp2 volume to 2,667 GB just to hit the IOPS target, and is significantly cheaper than io2. st1 is optimized for sequential HDD workloads, not random I/O database workloads.",
+    "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html",
+    "tags": ["ebs", "gp3", "iops", "performance"]
+  },
+  {
+    "id": "d3-1-q03",
+    "objective": "3.1 — High-Performing Storage Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "An HPC cluster needs to process a 10 TB dataset stored in S3. The ML training job requires sub-millisecond file access latency and hundreds of GB/s aggregate throughput. Which storage solution should be used?",
+    "options": [
+      { "id": "A", "text": "Mount S3 buckets directly using s3fs-fuse on each EC2 instance" },
+      { "id": "B", "text": "Copy the dataset to EFS with Max I/O performance mode before the training job" },
+      { "id": "C", "text": "Use Amazon FSx for Lustre linked to the S3 bucket" },
+      { "id": "D", "text": "Use Amazon FSx for Windows File Server with an SMB mount" }
+    ],
+    "correct": ["C"],
+    "rationale": "FSx for Lustre is a managed high-performance parallel file system that can be linked to an S3 bucket. Data is lazily loaded on first access and results written back to S3 automatically. It delivers sub-millisecond latencies and hundreds of GB/s throughput — purpose-built for HPC and ML workloads. s3fs-fuse has high latency and low throughput. EFS cannot match Lustre's raw HPC performance. FSx for Windows uses SMB/NTFS, inappropriate for Linux HPC.",
+    "sourceUrl": "https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html",
+    "tags": ["fsx-lustre", "hpc", "s3", "high-performance"]
+  },
+  {
+    "id": "d3-1-q04",
+    "objective": "3.1 — High-Performing Storage Solutions",
+    "domain": 3,
+    "difficulty": "hard",
+    "type": "single",
+    "stem": "A company stores compliance documents that are accessed unpredictably — sometimes daily, sometimes not for months. The retrieval time requirement is under 1 millisecond. Which S3 storage class optimizes cost without violating the retrieval SLA?",
+    "options": [
+      { "id": "A", "text": "S3 Standard-IA" },
+      { "id": "B", "text": "S3 Intelligent-Tiering" },
+      { "id": "C", "text": "S3 Glacier Instant Retrieval" },
+      { "id": "D", "text": "S3 Glacier Flexible Retrieval" }
+    ],
+    "correct": ["B"],
+    "rationale": "S3 Intelligent-Tiering automatically moves objects between access tiers based on actual access patterns, with no retrieval fees and immediate (millisecond) access at all times. It is ideal when access patterns are unknown or change over time. Standard-IA charges a retrieval fee per GB. Glacier Instant Retrieval also provides millisecond access but has a 90-day minimum storage duration and retrieval fees. Glacier Flexible has minutes-to-hours retrieval, violating the sub-millisecond SLA.",
+    "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html",
+    "tags": ["s3", "intelligent-tiering", "storage-classes", "cost-optimization"]
+  },
+  {
+    "id": "d3-1-q05",
+    "objective": "3.1 — High-Performing Storage Solutions",
+    "domain": 3,
+    "difficulty": "medium",
+    "type": "single",
+    "stem": "A microservices application runs across 200 EC2 instances in three Availability Zones. It needs a shared file system for configuration files and shared logs with unpredictable I/O spikes. Which EFS throughput mode is most appropriate?",
+    "options": [
+      { "id": "A", "text": "Bursting throughput with Max I/O performance mode" },
+      { "id": "B", "text": "Provisioned throughput with General Purpose performance mode" },
+      { "id": "C", "text": "Elastic throughput with General Purpose performance mode" },
+      { "id": "D", "text": "Bursting throughput with General Purpose performance mode" }
+    ],
+    "correct": ["C"],
+    "rationale": "Elastic throughput automatically scales to meet demand (up to 3 GB/s reads / 1 GB/s writes) and charges only for data transferred — ideal for unpredictable spiky workloads. General Purpose performance mode has lower latency than Max I/O and is recommended for most workloads. Provisioned is appropriate when you need consistently high throughput and can predict the required level. Bursting can be throttled when burst credits deplete during sustained high I/O.",
+    "sourceUrl": "https://docs.aws.amazon.com/efs/latest/ug/performance.html",
+    "tags": ["efs", "throughput-modes", "elastic", "performance"]
+  }
+]
+*/}
