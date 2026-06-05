@@ -2,145 +2,314 @@
   {
     "id": "s4-q01",
     "domain": 4,
-    "objective": "4.1 — Design Cost-Optimized Storage Solutions",
+    "objective": "4.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company collects application logs in Amazon S3. Logs are analyzed frequently for the first 30 days, occasionally queried for compliance purposes between 31-90 days, rarely accessed between 91-365 days, and must be retained for exactly 7 years for regulatory reasons. After 7 years logs must be permanently deleted. The company wants to minimize storage costs across the entire retention period. Which S3 lifecycle policy configuration best achieves this?",
     "options": [
-      { "id": "A", "text": "Store all logs in S3 Standard for the full 7 years. S3 Standard provides immediate availability and avoids retrieval fees." },
-      { "id": "B", "text": "Use a lifecycle policy: transition to S3 Standard-IA at day 31, transition to S3 Glacier Instant Retrieval at day 91, transition to S3 Glacier Deep Archive at day 366, and configure an expiration action at day 2,555 (7 years)." },
-      { "id": "C", "text": "Use a lifecycle policy: transition to S3 Intelligent-Tiering at day 1. Intelligent-Tiering automatically moves objects between tiers based on access patterns and handles all future transitions." },
-      { "id": "D", "text": "Use a lifecycle policy: transition to S3 One Zone-IA at day 31, then to S3 Glacier at day 91, and set an expiration at day 2,555." }
+      {
+        "id": "A",
+        "text": "Store all logs in S3 Standard for the full 7 years. S3 Standard provides immediate availability and avoids retrieval fees."
+      },
+      {
+        "id": "B",
+        "text": "Use a lifecycle policy: transition to S3 Standard-IA at day 31, transition to S3 Glacier Instant Retrieval at day 91, transition to S3 Glacier Deep Archive at day 366, and configure an expiration action at day 2,555 (7 years)."
+      },
+      {
+        "id": "C",
+        "text": "Use a lifecycle policy: transition to S3 Intelligent-Tiering at day 1. Intelligent-Tiering automatically moves objects between tiers based on access patterns and handles all future transitions."
+      },
+      {
+        "id": "D",
+        "text": "Use a lifecycle policy: transition to S3 One Zone-IA at day 31, then to S3 Glacier at day 91, and set an expiration at day 2,555."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because it maps each phase of the access pattern to the most cost-effective storage class. Days 1-30 (frequent access): S3 Standard — no retrieval fees, immediate access. Days 31-90 (occasional access): S3 Standard-IA — 58% lower storage cost than Standard, with retrieval fee appropriate for occasional access. Days 91-365 (rare access): S3 Glacier Instant Retrieval — millisecond retrieval for compliance queries, ~68% cheaper than Standard-IA. Days 366-2555 (very rare): S3 Glacier Deep Archive — the cheapest AWS storage at ~$0.00099/GB/month. Expiration at day 2,555 automatically deletes logs at exactly 7 years, avoiding indefinite storage costs. A is wrong because using S3 Standard for 7 years maximizes storage costs unnecessarily for rarely-accessed data. C is wrong because S3 Intelligent-Tiering charges a per-object monitoring fee ($0.0025/1,000 objects/month) and is most cost-effective when access patterns are unpredictable. The company's access pattern is well-defined and predictable, making explicit lifecycle transitions cheaper than Intelligent-Tiering monitoring overhead. D is wrong because S3 One Zone-IA stores data in only one Availability Zone. For regulatory log retention, single-AZ storage is inappropriate — if that AZ has a failure, compliance data may be unrecoverable.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because it maps each phase of the access pattern to the most cost-effective storage class. Days 1-30 (frequent access): S3 Standard \u2014 no retrieval fees, immediate access. Days 31-90 (occasional access): S3 Standard-IA \u2014 58% lower storage cost than Standard, with retrieval fee appropriate for occasional access. Days 91-365 (rare access): S3 Glacier Instant Retrieval \u2014 millisecond retrieval for compliance queries, ~68% cheaper than Standard-IA. Days 366-2555 (very rare): S3 Glacier Deep Archive \u2014 the cheapest AWS storage at ~$0.00099/GB/month. Expiration at day 2,555 automatically deletes logs at exactly 7 years, avoiding indefinite storage costs. A is wrong because using S3 Standard for 7 years maximizes storage costs unnecessarily for rarely-accessed data. C is wrong because S3 Intelligent-Tiering charges a per-object monitoring fee ($0.0025/1,000 objects/month) and is most cost-effective when access patterns are unpredictable. The company's access pattern is well-defined and predictable, making explicit lifecycle transitions cheaper than Intelligent-Tiering monitoring overhead. D is wrong because S3 One Zone-IA stores data in only one Availability Zone. For regulatory log retention, single-AZ storage is inappropriate \u2014 if that AZ has a failure, compliance data may be unrecoverable.",
     "sourceUrl": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html",
-    "tags": ["s3", "lifecycle-policy", "glacier", "storage-class", "cost-optimization", "compliance"]
+    "tags": [
+      "s3",
+      "lifecycle-policy",
+      "glacier",
+      "storage-class",
+      "cost-optimization",
+      "compliance"
+    ]
   },
   {
     "id": "s4-q02",
     "domain": 4,
-    "objective": "4.2 — Design Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company operates a three-tier web application on EC2 instances. After analyzing 12 months of CloudWatch metrics, the solutions architect finds: the web tier (4 instances) runs at 20-30% CPU all the time with no significant variation; the application tier (8 instances) runs at 60-70% CPU on weekdays 8am-6pm and 10-20% on weekends and nights; the database tier uses RDS MySQL Multi-AZ and runs at steady 40% CPU. The application tier uses On-Demand instances for all 8 instances. Which purchasing strategy minimizes cost without impacting availability?",
     "options": [
-      { "id": "A", "text": "Purchase 3-year Standard Reserved Instances for all 8 application tier instances. 3-year RIs provide the highest discount." },
-      { "id": "B", "text": "Purchase 1-year Standard Reserved Instances for 4 application tier instances (covering the steady nighttime/weekend baseline). Use Spot Instances for the remaining 4 instances that handle peak weekday load. Configure the Auto Scaling group to use a mixed instances policy." },
-      { "id": "C", "text": "Convert all 8 application tier On-Demand instances to Spot Instances. Use a Spot Fleet with diversification for cost savings." },
-      { "id": "D", "text": "Purchase 1-year Convertible Reserved Instances for all 8 application tier instances. Convertible RIs offer flexibility to change instance type if needed." }
+      {
+        "id": "A",
+        "text": "Purchase 3-year Standard Reserved Instances for all 8 application tier instances. 3-year RIs provide the highest discount."
+      },
+      {
+        "id": "B",
+        "text": "Purchase 1-year Standard Reserved Instances for 4 application tier instances (covering the steady nighttime/weekend baseline). Use Spot Instances for the remaining 4 instances that handle peak weekday load. Configure the Auto Scaling group to use a mixed instances policy."
+      },
+      {
+        "id": "C",
+        "text": "Convert all 8 application tier On-Demand instances to Spot Instances. Use a Spot Fleet with diversification for cost savings."
+      },
+      {
+        "id": "D",
+        "text": "Purchase 1-year Convertible Reserved Instances for all 8 application tier instances. Convertible RIs offer flexibility to change instance type if needed."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because it matches purchasing strategy to the workload profile with surgical precision. The 4 always-on instances (running even at night/weekend at ~10-20% CPU, meaning they never go to zero) should be covered by Reserved Instances for maximum discount on committed baseline capacity. The 4 peak instances that only run during business hours are ideal Spot candidates because: (1) the workload has flexible timing (if a Spot instance is interrupted, Auto Scaling replaces it), and (2) 8-hour weekday usage is too variable to commit to Reserved Instances cost-effectively. The mixed instances policy in Auto Scaling handles Spot diversification automatically. A is wrong because 3-year Reserved Instances lock in all 8 instances, but only 4 of them run 24/7 — the other 4 are idle nights and weekends, so the RI utilization would be low for those instances. B optimizes each class of instance separately. C is wrong because Spot Instances can be interrupted with 2 minutes notice, and using Spot for all instances without any On-Demand or RI baseline creates availability risk for a production web application tier. D is wrong because Convertible RIs for all 8 instances is better than standard RIs (more flexible) but still over-provisions reserved capacity for the 4 peak-only instances.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because it matches purchasing strategy to the workload profile with surgical precision. The 4 always-on instances (running even at night/weekend at ~10-20% CPU, meaning they never go to zero) should be covered by Reserved Instances for maximum discount on committed baseline capacity. The 4 peak instances that only run during business hours are ideal Spot candidates because: (1) the workload has flexible timing (if a Spot instance is interrupted, Auto Scaling replaces it), and (2) 8-hour weekday usage is too variable to commit to Reserved Instances cost-effectively. The mixed instances policy in Auto Scaling handles Spot diversification automatically. A is wrong because 3-year Reserved Instances lock in all 8 instances, but only 4 of them run 24/7 \u2014 the other 4 are idle nights and weekends, so the RI utilization would be low for those instances. B optimizes each class of instance separately. C is wrong because Spot Instances can be interrupted with 2 minutes notice, and using Spot for all instances without any On-Demand or RI baseline creates availability risk for a production web application tier. D is wrong because Convertible RIs for all 8 instances is better than standard RIs (more flexible) but still over-provisions reserved capacity for the 4 peak-only instances.",
     "sourceUrl": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-reserved-instances.html",
-    "tags": ["reserved-instances", "spot-instances", "mixed-instances", "cost-optimization", "auto-scaling"]
+    "tags": [
+      "reserved-instances",
+      "spot-instances",
+      "mixed-instances",
+      "cost-optimization",
+      "auto-scaling"
+    ]
   },
   {
     "id": "s4-q03",
     "domain": 4,
-    "objective": "4.3 — Design Cost-Optimized Networking Solutions",
+    "objective": "4.3",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company runs a large data processing application in a single AWS Region. The application's EC2 instances in private subnets frequently access data stored in Amazon S3 and Amazon DynamoDB. The monthly AWS bill shows that NAT Gateway data processing charges account for $12,000 of the $15,000 monthly network costs. The solutions architect reviews the architecture and finds that nearly all outbound traffic from the private subnets goes to S3 and DynamoDB endpoints. Which change eliminates the majority of this cost?",
     "options": [
-      { "id": "A", "text": "Replace the NAT Gateway with a NAT instance running on a t3.small EC2 instance. NAT instances have no data processing charges." },
-      { "id": "B", "text": "Create VPC Gateway Endpoints for Amazon S3 and Amazon DynamoDB. Update the private subnet route tables to route traffic destined for S3 and DynamoDB through the Gateway Endpoints instead of the NAT Gateway. Gateway Endpoints are free and traffic to S3/DynamoDB via Gateway Endpoints does not incur NAT Gateway data processing charges." },
-      { "id": "C", "text": "Move the EC2 instances from private subnets to public subnets and assign Elastic IPs. Traffic to S3 and DynamoDB no longer traverses the NAT Gateway." },
-      { "id": "D", "text": "Enable S3 Transfer Acceleration to route S3 traffic over CloudFront edge locations instead of through the NAT Gateway." }
+      {
+        "id": "A",
+        "text": "Replace the NAT Gateway with a NAT instance running on a t3.small EC2 instance. NAT instances have no data processing charges."
+      },
+      {
+        "id": "B",
+        "text": "Create VPC Gateway Endpoints for Amazon S3 and Amazon DynamoDB. Update the private subnet route tables to route traffic destined for S3 and DynamoDB through the Gateway Endpoints instead of the NAT Gateway. Gateway Endpoints are free and traffic to S3/DynamoDB via Gateway Endpoints does not incur NAT Gateway data processing charges."
+      },
+      {
+        "id": "C",
+        "text": "Move the EC2 instances from private subnets to public subnets and assign Elastic IPs. Traffic to S3 and DynamoDB no longer traverses the NAT Gateway."
+      },
+      {
+        "id": "D",
+        "text": "Enable S3 Transfer Acceleration to route S3 traffic over CloudFront edge locations instead of through the NAT Gateway."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because VPC Gateway Endpoints for S3 and DynamoDB are specifically designed to route traffic from VPC private subnets to these AWS services over the AWS private network, bypassing the NAT Gateway entirely. They are free to create and use (no hourly cost, no data processing fee). Since nearly all traffic ($12,000 / $15,000 = 80%+) goes to S3 and DynamoDB, adding Gateway Endpoints and updating route tables would eliminate approximately $12,000/month with a configuration-only change. A is wrong because a NAT instance does eliminate NAT Gateway data processing charges, but introduces management overhead, single-point-of-failure risk, and requires appropriate instance sizing. More importantly, it does not address the root cause: traffic to S3/DynamoDB should not traverse any NAT at all. B is the correct architectural fix. C is wrong because placing EC2 instances in public subnets with Elastic IPs exposes them directly to the internet, introducing significant security risk. Moving instances to public subnets to avoid NAT costs is not an acceptable trade-off. D is wrong because S3 Transfer Acceleration is designed to speed up uploads from remote clients over the internet — it has no effect on VPC-internal S3 access patterns and adds cost rather than removing it.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because VPC Gateway Endpoints for S3 and DynamoDB are specifically designed to route traffic from VPC private subnets to these AWS services over the AWS private network, bypassing the NAT Gateway entirely. They are free to create and use (no hourly cost, no data processing fee). Since nearly all traffic ($12,000 / $15,000 = 80%+) goes to S3 and DynamoDB, adding Gateway Endpoints and updating route tables would eliminate approximately $12,000/month with a configuration-only change. A is wrong because a NAT instance does eliminate NAT Gateway data processing charges, but introduces management overhead, single-point-of-failure risk, and requires appropriate instance sizing. More importantly, it does not address the root cause: traffic to S3/DynamoDB should not traverse any NAT at all. B is the correct architectural fix. C is wrong because placing EC2 instances in public subnets with Elastic IPs exposes them directly to the internet, introducing significant security risk. Moving instances to public subnets to avoid NAT costs is not an acceptable trade-off. D is wrong because S3 Transfer Acceleration is designed to speed up uploads from remote clients over the internet \u2014 it has no effect on VPC-internal S3 access patterns and adds cost rather than removing it.",
     "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-s3.html",
-    "tags": ["vpc-endpoints", "gateway-endpoint", "nat-gateway", "s3", "dynamodb", "cost-optimization", "data-transfer"]
+    "tags": [
+      "vpc-endpoints",
+      "gateway-endpoint",
+      "nat-gateway",
+      "s3",
+      "dynamodb",
+      "cost-optimization",
+      "data-transfer"
+    ]
   },
   {
     "id": "s4-q04",
     "domain": 4,
-    "objective": "4.3 — Design Cost-Optimized Networking Solutions",
+    "objective": "4.3",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company's microservices architecture runs across three Availability Zones in a single AWS Region. Each service tier (web, app, data) is deployed in separate subnets in all three AZs. Application Load Balancers route traffic between tiers. AWS Cost Explorer shows $8,000/month in EC2 data transfer costs tagged as 'inter-AZ'. The solutions architect reviews the architecture and finds that the ALBs are routing each request from the web tier in AZ-A to the app tier in AZ-B or AZ-C, crossing AZ boundaries on every request. Which configuration reduces inter-AZ data transfer costs without sacrificing availability?",
     "options": [
-      { "id": "A", "text": "Consolidate all resources into a single Availability Zone to eliminate inter-AZ data transfer charges entirely." },
-      { "id": "B", "text": "Enable Availability Zone Affinity (zonal shift) on the Application Load Balancers. When enabled, the ALB prefers to route requests to targets in the same AZ as the incoming connection, minimizing cross-AZ traffic. Ensure each AZ has sufficient capacity to handle the full load if one AZ fails." },
-      { "id": "C", "text": "Replace the Application Load Balancers with Network Load Balancers. NLBs do not charge for inter-AZ data transfer." },
-      { "id": "D", "text": "Move from multi-AZ to multi-region. Cross-region data transfer is billed differently and can be optimized with CloudFront." }
+      {
+        "id": "A",
+        "text": "Consolidate all resources into a single Availability Zone to eliminate inter-AZ data transfer charges entirely."
+      },
+      {
+        "id": "B",
+        "text": "Enable Availability Zone Affinity (zonal shift) on the Application Load Balancers. When enabled, the ALB prefers to route requests to targets in the same AZ as the incoming connection, minimizing cross-AZ traffic. Ensure each AZ has sufficient capacity to handle the full load if one AZ fails."
+      },
+      {
+        "id": "C",
+        "text": "Replace the Application Load Balancers with Network Load Balancers. NLBs do not charge for inter-AZ data transfer."
+      },
+      {
+        "id": "D",
+        "text": "Move from multi-AZ to multi-region. Cross-region data transfer is billed differently and can be optimized with CloudFront."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because ALB Availability Zone Affinity (also called 'target group cross-zone load balancing disabled' or 'AZ affinity routing') routes a request received in AZ-A to targets also in AZ-A first, only crossing to other AZs if no healthy targets exist locally. This directly eliminates the unnecessary AZ boundary crossings that cause the $8,000/month charge. The key trade-off (sufficient capacity per AZ) preserves the availability goal. A is wrong because concentrating all resources in one AZ eliminates inter-AZ charges but removes the high-availability that multi-AZ deployment provides — a single AZ failure would take down the entire application. This trades cost for availability, which is not acceptable. C is wrong because Network Load Balancers do charge for cross-AZ data transfer when cross-zone load balancing is enabled (NLBs have cross-zone load balancing disabled by default, but ALBs have it enabled by default). More importantly, ALBs and NLBs serve different purposes — HTTP/HTTPS routing with path-based rules requires ALB, and NLBs are for TCP/UDP. D is wrong because multi-region increases data transfer costs dramatically (inter-region is far more expensive than inter-AZ) and adds operational complexity.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because ALB Availability Zone Affinity (also called 'target group cross-zone load balancing disabled' or 'AZ affinity routing') routes a request received in AZ-A to targets also in AZ-A first, only crossing to other AZs if no healthy targets exist locally. This directly eliminates the unnecessary AZ boundary crossings that cause the $8,000/month charge. The key trade-off (sufficient capacity per AZ) preserves the availability goal. A is wrong because concentrating all resources in one AZ eliminates inter-AZ charges but removes the high-availability that multi-AZ deployment provides \u2014 a single AZ failure would take down the entire application. This trades cost for availability, which is not acceptable. C is wrong because Network Load Balancers do charge for cross-AZ data transfer when cross-zone load balancing is enabled (NLBs have cross-zone load balancing disabled by default, but ALBs have it enabled by default). More importantly, ALBs and NLBs serve different purposes \u2014 HTTP/HTTPS routing with path-based rules requires ALB, and NLBs are for TCP/UDP. D is wrong because multi-region increases data transfer costs dramatically (inter-region is far more expensive than inter-AZ) and adds operational complexity.",
     "sourceUrl": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/disable-cross-zone.html",
-    "tags": ["alb", "cross-zone", "data-transfer", "inter-az", "cost-optimization", "availability-zone"]
+    "tags": [
+      "alb",
+      "cross-zone",
+      "data-transfer",
+      "inter-az",
+      "cost-optimization",
+      "availability-zone"
+    ]
   },
   {
     "id": "s4-q05",
     "domain": 4,
-    "objective": "4.3 — Design Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "difficulty": "hard",
     "type": "single",
     "stem": "A startup runs a SaaS application with a MySQL database backend. The application has highly variable database load: weekday business hours see 2,000-5,000 connections and complex queries; weekend nights see near-zero activity with fewer than 10 connections. The team currently runs an Aurora MySQL Provisioned cluster (db.r6g.4xlarge primary + 1 read replica) 24/7, costing $3,200/month. Database storage is 200 GB. The team wants to reduce costs while maintaining sub-second query response during peak hours. Which Aurora option best balances cost and performance?",
     "options": [
-      { "id": "A", "text": "Switch to Aurora Serverless v2. Aurora Serverless v2 scales ACUs (Aurora Capacity Units) in fine-grained increments from 0.5 ACUs to 128 ACUs in under 1 second. Set minimum ACUs to 0.5 (near-zero cost during idle periods) and maximum to 64 ACUs (matching peak provisioned capacity). Aurora Serverless v2 can serve as both writer and reader." },
-      { "id": "B", "text": "Switch to Aurora Serverless v1. During idle nights and weekends the cluster pauses completely (0 ACUs), incurring no compute charges. When the first connection arrives, the cluster resumes in 25-30 seconds." },
-      { "id": "C", "text": "Keep the provisioned cluster but use scheduled Auto Scaling to stop the Aurora cluster every night at 8pm and restart it at 7am." },
-      { "id": "D", "text": "Migrate from Aurora MySQL to Amazon RDS MySQL with Multi-AZ. RDS Multi-AZ is cheaper than Aurora for the same instance size." }
+      {
+        "id": "A",
+        "text": "Switch to Aurora Serverless v2. Aurora Serverless v2 scales ACUs (Aurora Capacity Units) in fine-grained increments from 0.5 ACUs to 128 ACUs in under 1 second. Set minimum ACUs to 0.5 (near-zero cost during idle periods) and maximum to 64 ACUs (matching peak provisioned capacity). Aurora Serverless v2 can serve as both writer and reader."
+      },
+      {
+        "id": "B",
+        "text": "Switch to Aurora Serverless v1. During idle nights and weekends the cluster pauses completely (0 ACUs), incurring no compute charges. When the first connection arrives, the cluster resumes in 25-30 seconds."
+      },
+      {
+        "id": "C",
+        "text": "Keep the provisioned cluster but use scheduled Auto Scaling to stop the Aurora cluster every night at 8pm and restart it at 7am."
+      },
+      {
+        "id": "D",
+        "text": "Migrate from Aurora MySQL to Amazon RDS MySQL with Multi-AZ. RDS Multi-AZ is cheaper than Aurora for the same instance size."
+      }
     ],
-    "correct": ["A"],
-    "rationale": "A is correct because Aurora Serverless v2 is specifically designed for this variable workload profile. It scales instantaneously (within 1 second) in fine-grained 0.5 ACU increments, so during peak hours it scales to full capacity (sub-second response maintained), and during idle weekends it scales down to 0.5 ACUs (minimum charge of ~$0.06/hour vs ~$4.50/hour for db.r6g.4xlarge). This provides significant savings on the ~60+ idle hours per week without any cold-start latency, since Serverless v2 never fully pauses. Aurora Serverless v2 also supports read replicas for additional read scaling. B is wrong because Aurora Serverless v1 does pause to 0 ACUs (excellent for near-zero idle cost), but the 25-30 second resume time means the first request after a pause will time out. For a SaaS application where users may access at any time, this cold-start latency is unacceptable and violates the sub-second response requirement. C is wrong because Aurora clusters cannot be stopped and started on a schedule like EC2 instances — Aurora clusters stop after being manually stopped, but this does not apply to scheduled automation, and a stopped Aurora cluster still incurs storage charges. D is wrong because Aurora MySQL and RDS MySQL have comparable pricing for similar instance sizes. Switching to RDS would lose Aurora features without meaningful cost savings, and the variable load problem remains unsolved.",
+    "correct": [
+      "A"
+    ],
+    "rationale": "A is correct because Aurora Serverless v2 is specifically designed for this variable workload profile. It scales instantaneously (within 1 second) in fine-grained 0.5 ACU increments, so during peak hours it scales to full capacity (sub-second response maintained), and during idle weekends it scales down to 0.5 ACUs (minimum charge of ~$0.06/hour vs ~$4.50/hour for db.r6g.4xlarge). This provides significant savings on the ~60+ idle hours per week without any cold-start latency, since Serverless v2 never fully pauses. Aurora Serverless v2 also supports read replicas for additional read scaling. B is wrong because Aurora Serverless v1 does pause to 0 ACUs (excellent for near-zero idle cost), but the 25-30 second resume time means the first request after a pause will time out. For a SaaS application where users may access at any time, this cold-start latency is unacceptable and violates the sub-second response requirement. C is wrong because Aurora clusters cannot be stopped and started on a schedule like EC2 instances \u2014 Aurora clusters stop after being manually stopped, but this does not apply to scheduled automation, and a stopped Aurora cluster still incurs storage charges. D is wrong because Aurora MySQL and RDS MySQL have comparable pricing for similar instance sizes. Switching to RDS would lose Aurora features without meaningful cost savings, and the variable load problem remains unsolved.",
     "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html",
-    "tags": ["aurora-serverless-v2", "aurora", "database", "cost-optimization", "variable-workload", "scaling"]
+    "tags": [
+      "aurora-serverless-v2",
+      "aurora",
+      "database",
+      "cost-optimization",
+      "variable-workload",
+      "scaling"
+    ]
   },
   {
     "id": "s4-q06",
     "domain": 4,
-    "objective": "4.2 — Design Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company has been running AWS workloads for 2 years. Their account has $400,000/year in EC2 and Fargate spend. AWS Compute Optimizer shows that 60% of EC2 instances are oversized. The team is also considering committing to long-term discounts. They currently have no Reserved Instances or Savings Plans. The compute portfolio includes: EC2 instances (various families: m5, c5, r5, t3), ECS Fargate tasks, and Lambda functions. Which commitment strategy provides the most flexibility across this diverse compute portfolio?",
     "options": [
-      { "id": "A", "text": "Purchase Standard Reserved Instances for each EC2 instance family and size (m5.xlarge, c5.2xlarge, etc.) separately. Standard RIs provide the highest discount (~72%) for the specific instance type." },
-      { "id": "B", "text": "Purchase Compute Savings Plans. Compute Savings Plans apply automatically across EC2 (any instance family, size, OS, tenancy, Region), Fargate, and Lambda — the entire current compute portfolio. They provide up to 66% savings and require no instance family/size commitment." },
-      { "id": "C", "text": "Purchase EC2 Instance Savings Plans for the m5 family only, since m5 is the most common instance type. EC2 Instance Savings Plans provide 72% savings for the committed family." },
-      { "id": "D", "text": "Apply the right-sizing recommendations from Compute Optimizer first (reducing the billing baseline by 60%), then reassess commitment strategy after 6 months of running at the correct size." }
+      {
+        "id": "A",
+        "text": "Purchase Standard Reserved Instances for each EC2 instance family and size (m5.xlarge, c5.2xlarge, etc.) separately. Standard RIs provide the highest discount (~72%) for the specific instance type."
+      },
+      {
+        "id": "B",
+        "text": "Purchase Compute Savings Plans. Compute Savings Plans apply automatically across EC2 (any instance family, size, OS, tenancy, Region), Fargate, and Lambda \u2014 the entire current compute portfolio. They provide up to 66% savings and require no instance family/size commitment."
+      },
+      {
+        "id": "C",
+        "text": "Purchase EC2 Instance Savings Plans for the m5 family only, since m5 is the most common instance type. EC2 Instance Savings Plans provide 72% savings for the committed family."
+      },
+      {
+        "id": "D",
+        "text": "Apply the right-sizing recommendations from Compute Optimizer first (reducing the billing baseline by 60%), then reassess commitment strategy after 6 months of running at the correct size."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because Compute Savings Plans are the most flexible commitment option AWS offers for a diverse compute portfolio. They apply to EC2 across any instance family, size, region, OS, and tenancy, and also automatically cover ECS Fargate and Lambda. For a company with mixed EC2 families (m5, c5, r5, t3) plus Fargate and Lambda, Compute Savings Plans provide broad coverage with a single commitment and up to 66% discount — without locking into specific instance types that may change with right-sizing or architecture evolution. A is wrong because Standard Reserved Instances for specific instance types provide ~72% discount but require exact family/size/region commitment. Given that Compute Optimizer recommends changing 60% of instances, purchasing RIs for current oversized instances would waste the RI commitment after right-sizing. They also don't cover Fargate or Lambda. C is wrong because EC2 Instance Savings Plans are per-family (flexible within one region across sizes/OS) — they do not cover Fargate or Lambda. Covering only the m5 family leaves c5, r5, and t3 at On-Demand pricing. D is wrong because right-sizing first is sound advice as a preparatory step, but the question asks for the best commitment strategy. The correct answer is B — the strategy that provides maximum flexibility across the whole portfolio. (In practice, doing D before B is a best practice, but as the sole answer, B provides the right flexibility.)",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Compute Savings Plans are the most flexible commitment option AWS offers for a diverse compute portfolio. They apply to EC2 across any instance family, size, region, OS, and tenancy, and also automatically cover ECS Fargate and Lambda. For a company with mixed EC2 families (m5, c5, r5, t3) plus Fargate and Lambda, Compute Savings Plans provide broad coverage with a single commitment and up to 66% discount \u2014 without locking into specific instance types that may change with right-sizing or architecture evolution. A is wrong because Standard Reserved Instances for specific instance types provide ~72% discount but require exact family/size/region commitment. Given that Compute Optimizer recommends changing 60% of instances, purchasing RIs for current oversized instances would waste the RI commitment after right-sizing. They also don't cover Fargate or Lambda. C is wrong because EC2 Instance Savings Plans are per-family (flexible within one region across sizes/OS) \u2014 they do not cover Fargate or Lambda. Covering only the m5 family leaves c5, r5, and t3 at On-Demand pricing. D is wrong because right-sizing first is sound advice as a preparatory step, but the question asks for the best commitment strategy. The correct answer is B \u2014 the strategy that provides maximum flexibility across the whole portfolio. (In practice, doing D before B is a best practice, but as the sole answer, B provides the right flexibility.)",
     "sourceUrl": "https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html",
-    "tags": ["savings-plans", "reserved-instances", "cost-optimization", "fargate", "lambda", "compute-optimizer"]
+    "tags": [
+      "savings-plans",
+      "reserved-instances",
+      "cost-optimization",
+      "fargate",
+      "lambda",
+      "compute-optimizer"
+    ]
   },
   {
     "id": "s4-q07",
     "domain": 4,
-    "objective": "4.2 — Design Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company uses AWS Compute Optimizer to analyze its EC2 fleet. The report flags an m5.4xlarge instance (16 vCPU, 64 GB RAM) running a web API as 'over-provisioned.' CPU utilization averages 8% and memory utilization averages 12% over the past 30 days. Peak CPU occurs on the 1st of each month (billing cycle) reaching 45% for about 2 hours. Compute Optimizer recommends downsizing to m5.xlarge (4 vCPU, 16 GB RAM). The solutions architect must verify this recommendation is safe before applying it. Which factor should be evaluated before accepting the right-sizing recommendation?",
     "options": [
-      { "id": "A", "text": "Check whether the instance is covered by a Reserved Instance. If it is, downsizing would waste the RI commitment." },
-      { "id": "B", "text": "Evaluate whether the application is CPU-bound or memory-bound at the 45% CPU peak on the 1st of each month. If the m5.4xlarge reaches 45% CPU, the m5.xlarge (which has 1/4 the vCPUs) would reach ~180% CPU equivalent load — which would mean severe throttling. Compute Optimizer's average-based recommendation may underestimate peak requirements." },
-      { "id": "C", "text": "Check whether the AMI supports the m5.xlarge instance type. Some AMIs are restricted to specific instance sizes." },
-      { "id": "D", "text": "Verify that the VPC's CIDR block has enough IP addresses for the new instance after the change." }
+      {
+        "id": "A",
+        "text": "Check whether the instance is covered by a Reserved Instance. If it is, downsizing would waste the RI commitment."
+      },
+      {
+        "id": "B",
+        "text": "Evaluate whether the application is CPU-bound or memory-bound at the 45% CPU peak on the 1st of each month. If the m5.4xlarge reaches 45% CPU, the m5.xlarge (which has 1/4 the vCPUs) would reach ~180% CPU equivalent load \u2014 which would mean severe throttling. Compute Optimizer's average-based recommendation may underestimate peak requirements."
+      },
+      {
+        "id": "C",
+        "text": "Check whether the AMI supports the m5.xlarge instance type. Some AMIs are restricted to specific instance sizes."
+      },
+      {
+        "id": "D",
+        "text": "Verify that the VPC's CIDR block has enough IP addresses for the new instance after the change."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because Compute Optimizer's recommendations are based on observed utilization metrics (often average or p99 over the analysis window), and a monthly 2-hour peak that reaches 45% CPU on a 16-vCPU machine represents significant burst capacity. If the application is scaled to an m5.xlarge (4 vCPU), the same workload during the monthly billing spike would demand the equivalent of 45% × 4 = 180% of the smaller instance's capacity, causing CPU throttling, slow API responses, and potential timeouts. Before accepting the recommendation, the solutions architect should load-test the m5.xlarge under simulated peak load or verify that the application can gracefully degrade. Alternatively, right-sizing to an m5.2xlarge (8 vCPU) may be the correct middle ground. A is relevant operationally (RI waste is a financial consideration) but is not a safety/correctness concern — the instance can still be downsized, and the RI can be converted or resold. C is wrong because AMIs are not restricted by instance size within the same generation; any m5-series instance supports any m5-compatible AMI. D is wrong because changing the instance size does not change IP address assignment — the instance retains its private IP.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Compute Optimizer's recommendations are based on observed utilization metrics (often average or p99 over the analysis window), and a monthly 2-hour peak that reaches 45% CPU on a 16-vCPU machine represents significant burst capacity. If the application is scaled to an m5.xlarge (4 vCPU), the same workload during the monthly billing spike would demand the equivalent of 45% \u00d7 4 = 180% of the smaller instance's capacity, causing CPU throttling, slow API responses, and potential timeouts. Before accepting the recommendation, the solutions architect should load-test the m5.xlarge under simulated peak load or verify that the application can gracefully degrade. Alternatively, right-sizing to an m5.2xlarge (8 vCPU) may be the correct middle ground. A is relevant operationally (RI waste is a financial consideration) but is not a safety/correctness concern \u2014 the instance can still be downsized, and the RI can be converted or resold. C is wrong because AMIs are not restricted by instance size within the same generation; any m5-series instance supports any m5-compatible AMI. D is wrong because changing the instance size does not change IP address assignment \u2014 the instance retains its private IP.",
     "sourceUrl": "https://docs.aws.amazon.com/compute-optimizer/latest/ug/viewing-recommendations.html",
-    "tags": ["compute-optimizer", "right-sizing", "ec2", "peak-load", "cost-optimization", "performance"]
+    "tags": [
+      "compute-optimizer",
+      "right-sizing",
+      "ec2",
+      "peak-load",
+      "cost-optimization",
+      "performance"
+    ]
   },
   {
     "id": "s4-q08",
     "domain": 4,
-    "objective": "4.1 — Design Cost-Optimized Storage Solutions",
+    "objective": "4.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company stores customer-facing product images in Amazon S3 Standard and serves them via an Application Load Balancer directly from EC2. The bucket contains 200 TB of images. The solutions architect reviews the AWS Cost Explorer and finds that EC2 data transfer out to internet charges are $18,000/month. The images are static and change only when a new product is added. Global customers frequently re-request the same popular product images. Which architecture change reduces data transfer costs most significantly?",
     "options": [
-      { "id": "A", "text": "Enable S3 Requester Pays on the bucket. Customers are charged for data transfer instead of the company." },
-      { "id": "B", "text": "Place Amazon CloudFront in front of the S3 bucket as the origin. Popular product images will be cached at CloudFront edge locations globally. Subsequent requests for the same image are served from the edge cache, not from the origin. CloudFront-to-internet data transfer rates are lower than EC2-to-internet rates, and cache hits incur no S3 GET charges." },
-      { "id": "C", "text": "Move product images from S3 Standard to S3 Intelligent-Tiering to reduce storage costs. Data transfer costs are unaffected by storage class." },
-      { "id": "D", "text": "Compress all images to reduce the size of each transfer. Smaller files reduce data transfer costs proportionally." }
+      {
+        "id": "A",
+        "text": "Enable S3 Requester Pays on the bucket. Customers are charged for data transfer instead of the company."
+      },
+      {
+        "id": "B",
+        "text": "Place Amazon CloudFront in front of the S3 bucket as the origin. Popular product images will be cached at CloudFront edge locations globally. Subsequent requests for the same image are served from the edge cache, not from the origin. CloudFront-to-internet data transfer rates are lower than EC2-to-internet rates, and cache hits incur no S3 GET charges."
+      },
+      {
+        "id": "C",
+        "text": "Move product images from S3 Standard to S3 Intelligent-Tiering to reduce storage costs. Data transfer costs are unaffected by storage class."
+      },
+      {
+        "id": "D",
+        "text": "Compress all images to reduce the size of each transfer. Smaller files reduce data transfer costs proportionally."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because Amazon CloudFront is a CDN that caches static content (like product images) at 400+ edge locations worldwide. Once a popular image is cached at an edge, all subsequent global requests for that image are served locally from the edge with no origin egress. This eliminates the repeat-request cost entirely for popular images. Additionally, CloudFront-to-internet data transfer rates are significantly lower than EC2-to-internet rates (CloudFront data transfer can be 50-80% cheaper, especially for high volumes via CloudFront's price class discounts). The problem statement explicitly says images are static and popular images are re-requested frequently — a perfect cache hit scenario. The architecture should also change the origin from EC2 to S3 directly (removing EC2 from the serving path), eliminating EC2 data transfer entirely. A is wrong because S3 Requester Pays shifts cost to customers, which harms the customer experience for a customer-facing product catalog. It also does not reduce the underlying bandwidth used or improve performance. C is wrong because storage class only affects storage pricing, not data transfer pricing. S3 data transfer costs are the same regardless of storage class. D is wrong because image compression is a valid optimization but requires engineering effort and may reduce image quality. It does not address the architectural inefficiency of serving the same popular image repeatedly from the origin instead of from a cache.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because Amazon CloudFront is a CDN that caches static content (like product images) at 400+ edge locations worldwide. Once a popular image is cached at an edge, all subsequent global requests for that image are served locally from the edge with no origin egress. This eliminates the repeat-request cost entirely for popular images. Additionally, CloudFront-to-internet data transfer rates are significantly lower than EC2-to-internet rates (CloudFront data transfer can be 50-80% cheaper, especially for high volumes via CloudFront's price class discounts). The problem statement explicitly says images are static and popular images are re-requested frequently \u2014 a perfect cache hit scenario. The architecture should also change the origin from EC2 to S3 directly (removing EC2 from the serving path), eliminating EC2 data transfer entirely. A is wrong because S3 Requester Pays shifts cost to customers, which harms the customer experience for a customer-facing product catalog. It also does not reduce the underlying bandwidth used or improve performance. C is wrong because storage class only affects storage pricing, not data transfer pricing. S3 data transfer costs are the same regardless of storage class. D is wrong because image compression is a valid optimization but requires engineering effort and may reduce image quality. It does not address the architectural inefficiency of serving the same popular image repeatedly from the origin instead of from a cache.",
     "sourceUrl": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html",
-    "tags": ["cloudfront", "cdn", "s3", "data-transfer", "cost-optimization", "caching", "static-content"]
+    "tags": [
+      "cloudfront",
+      "cdn",
+      "s3",
+      "data-transfer",
+      "cost-optimization",
+      "caching",
+      "static-content"
+    ]
   }
 ]

@@ -2,145 +2,314 @@
   {
     "id": "s2-q01",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A global e-commerce company runs its primary workload in us-east-1. During a regional outage last year, the site was unavailable for 4 hours. Management now requires an RTO of 15 minutes and RPO of 5 minutes. The application uses RDS MySQL (500 GB), EC2 Auto Scaling, S3, and Route 53. Which disaster recovery strategy and Route 53 configuration best satisfies both requirements at the lowest cost?",
     "options": [
-      { "id": "A", "text": "Implement a Backup and Restore strategy. Take daily RDS snapshots and copy them to us-west-2. In a disaster, restore from the latest snapshot, launch EC2 instances, and update Route 53 records manually." },
-      { "id": "B", "text": "Implement a Pilot Light strategy. Keep a minimal EC2 Auto Scaling group (1 instance, scaled down) and an RDS read replica running in us-west-2. Use Route 53 failover routing with a health check on the primary. On failover, promote the RDS read replica and scale up the Auto Scaling group using a runbook." },
-      { "id": "C", "text": "Implement a Warm Standby strategy with full-capacity EC2 Auto Scaling and an Aurora Global Database with a secondary region in us-west-2. Configure Route 53 failover routing with a health check. On failover, promote the Aurora secondary (RTO ~1 minute for promotion) and Route 53 automatically re-routes traffic. The warm standby keeps EC2 at minimum but scales rapidly." },
-      { "id": "D", "text": "Implement a Multi-Site Active/Active strategy. Run identical full-capacity stacks in both us-east-1 and us-west-2. Use Route 53 latency routing to distribute traffic evenly between regions at all times." }
+      {
+        "id": "A",
+        "text": "Implement a Backup and Restore strategy. Take daily RDS snapshots and copy them to us-west-2. In a disaster, restore from the latest snapshot, launch EC2 instances, and update Route 53 records manually."
+      },
+      {
+        "id": "B",
+        "text": "Implement a Pilot Light strategy. Keep a minimal EC2 Auto Scaling group (1 instance, scaled down) and an RDS read replica running in us-west-2. Use Route 53 failover routing with a health check on the primary. On failover, promote the RDS read replica and scale up the Auto Scaling group using a runbook."
+      },
+      {
+        "id": "C",
+        "text": "Implement a Warm Standby strategy with full-capacity EC2 Auto Scaling and an Aurora Global Database with a secondary region in us-west-2. Configure Route 53 failover routing with a health check. On failover, promote the Aurora secondary (RTO ~1 minute for promotion) and Route 53 automatically re-routes traffic. The warm standby keeps EC2 at minimum but scales rapidly."
+      },
+      {
+        "id": "D",
+        "text": "Implement a Multi-Site Active/Active strategy. Run identical full-capacity stacks in both us-east-1 and us-west-2. Use Route 53 latency routing to distribute traffic evenly between regions at all times."
+      }
     ],
-    "correct": ["C"],
-    "rationale": "C is correct because a Warm Standby with Aurora Global Database directly meets both constraints. Aurora Global Database replicates with sub-second lag (RPO ~1 second, well within the 5-minute requirement) and promotion takes under 1 minute (RTO well within 15 minutes). Route 53 failover routing with health checks automates traffic cutover. A is wrong because Backup and Restore has RTOs of hours (restore time, EC2 launch, DNS propagation), which far exceeds 15 minutes. B is wrong because Pilot Light with an RDS MySQL read replica is close, but MySQL read replica promotion (stopping replication, reconfiguring, application reconnect) typically takes 15-30 minutes and is riskier than Aurora Global Database promotion. D is wrong because Multi-Site Active/Active meets the RTO/RPO with the highest cost — the requirement asks for the lowest cost solution, and active/active doubles infrastructure spend.",
+    "correct": [
+      "C"
+    ],
+    "rationale": "C is correct because a Warm Standby with Aurora Global Database directly meets both constraints. Aurora Global Database replicates with sub-second lag (RPO ~1 second, well within the 5-minute requirement) and promotion takes under 1 minute (RTO well within 15 minutes). Route 53 failover routing with health checks automates traffic cutover. A is wrong because Backup and Restore has RTOs of hours (restore time, EC2 launch, DNS propagation), which far exceeds 15 minutes. B is wrong because Pilot Light with an RDS MySQL read replica is close, but MySQL read replica promotion (stopping replication, reconfiguring, application reconnect) typically takes 15-30 minutes and is riskier than Aurora Global Database promotion. D is wrong because Multi-Site Active/Active meets the RTO/RPO with the highest cost \u2014 the requirement asks for the lowest cost solution, and active/active doubles infrastructure spend.",
     "sourceUrl": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html",
-    "tags": ["disaster-recovery", "route53", "aurora", "global-database", "rto-rpo", "failover"]
+    "tags": [
+      "disaster-recovery",
+      "route53",
+      "aurora",
+      "global-database",
+      "rto-rpo",
+      "failover"
+    ]
   },
   {
     "id": "s2-q02",
     "domain": 2,
-    "objective": "2.2 — Design Loosely Coupled Architectures",
+    "objective": "2.2",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company processes customer orders. When an order is placed, three downstream services must be notified: an inventory service, a shipping service, and a loyalty points service. Each service must receive every order event, but occasionally one service is unavailable. The ordering service must not block waiting for downstream services, and failed deliveries to temporarily unavailable services must be retried automatically without losing events. Which messaging pattern best satisfies these requirements?",
     "options": [
-      { "id": "A", "text": "Use Amazon SQS with a single standard queue. Have the inventory, shipping, and loyalty services each poll the queue. Use SQS message visibility timeout and dead-letter queues for retry." },
-      { "id": "B", "text": "Use Amazon SNS to publish order events from the ordering service. Subscribe an Amazon SQS queue for each downstream service (fan-out pattern). Each service polls its own SQS queue. Configure a dead-letter queue on each SQS queue for retry and failure handling." },
-      { "id": "C", "text": "Use Amazon EventBridge with a custom event bus. Publish order events to the event bus. Create EventBridge rules for each downstream service. Each rule triggers the service's Lambda function directly." },
-      { "id": "D", "text": "Have the ordering service call each downstream service synchronously via REST APIs within a single transaction. Use retry logic with exponential backoff in the ordering service code." }
+      {
+        "id": "A",
+        "text": "Use Amazon SQS with a single standard queue. Have the inventory, shipping, and loyalty services each poll the queue. Use SQS message visibility timeout and dead-letter queues for retry."
+      },
+      {
+        "id": "B",
+        "text": "Use Amazon SNS to publish order events from the ordering service. Subscribe an Amazon SQS queue for each downstream service (fan-out pattern). Each service polls its own SQS queue. Configure a dead-letter queue on each SQS queue for retry and failure handling."
+      },
+      {
+        "id": "C",
+        "text": "Use Amazon EventBridge with a custom event bus. Publish order events to the event bus. Create EventBridge rules for each downstream service. Each rule triggers the service's Lambda function directly."
+      },
+      {
+        "id": "D",
+        "text": "Have the ordering service call each downstream service synchronously via REST APIs within a single transaction. Use retry logic with exponential backoff in the ordering service code."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because the SNS→SQS fan-out pattern is the canonical AWS solution for this exact scenario. SNS delivers the order event to all three SQS queues simultaneously (fan-out), so each service gets its own independent copy. SQS decouples the downstream services from the ordering service (fire-and-forget). The SQS visibility timeout and dead-letter queue handle retries and poison messages per-service without affecting the others. A is wrong because a single SQS queue would deliver each message to only one of the three competing consumers — the three services would race for each message, and some services would miss events. C is wrong because EventBridge with direct Lambda invocation has no built-in buffering; if the Lambda is throttled or fails after a few retries, the event is lost. EventBridge would need to target SQS queues (not Lambda) to guarantee delivery during service unavailability. D is wrong because synchronous API calls make the ordering service dependent on downstream availability, violating the loose coupling requirement.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because the SNS\u2192SQS fan-out pattern is the canonical AWS solution for this exact scenario. SNS delivers the order event to all three SQS queues simultaneously (fan-out), so each service gets its own independent copy. SQS decouples the downstream services from the ordering service (fire-and-forget). The SQS visibility timeout and dead-letter queue handle retries and poison messages per-service without affecting the others. A is wrong because a single SQS queue would deliver each message to only one of the three competing consumers \u2014 the three services would race for each message, and some services would miss events. C is wrong because EventBridge with direct Lambda invocation has no built-in buffering; if the Lambda is throttled or fails after a few retries, the event is lost. EventBridge would need to target SQS queues (not Lambda) to guarantee delivery during service unavailability. D is wrong because synchronous API calls make the ordering service dependent on downstream availability, violating the loose coupling requirement.",
     "sourceUrl": "https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html",
-    "tags": ["sns", "sqs", "fan-out", "loose-coupling", "messaging", "dead-letter-queue"]
+    "tags": [
+      "sns",
+      "sqs",
+      "fan-out",
+      "loose-coupling",
+      "messaging",
+      "dead-letter-queue"
+    ]
   },
   {
     "id": "s2-q03",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company runs a MySQL database on a single EC2 instance with a GP2 EBS volume. The application has grown and now requires 99.95% database availability. The team evaluates Amazon RDS Multi-AZ and Aurora MySQL. The database is 800 GB. The team needs automatic failover, automatic backups, and the ability to run read-heavy analytics queries without impacting the primary. Which option best meets all requirements?",
     "options": [
-      { "id": "A", "text": "Migrate to Amazon RDS MySQL with Multi-AZ deployment. For analytics, create up to 5 RDS Read Replicas and direct analytics queries to them." },
-      { "id": "B", "text": "Keep the database on EC2. Add a second EC2 instance as a MySQL replica in a different Availability Zone. Write a custom failover script triggered by a CloudWatch alarm when the primary instance fails." },
-      { "id": "C", "text": "Migrate to Amazon Aurora MySQL. Aurora automatically maintains 6 copies of data across 3 AZs, provides sub-30-second automatic failover, supports up to 15 Aurora Replicas for read scaling, and offers Aurora Serverless for variable load. Enable the Aurora Reader endpoint for analytics traffic." },
-      { "id": "D", "text": "Migrate to Amazon RDS MySQL with Multi-AZ and enable RDS Proxy in front of the database to reduce failover impact. Do not add read replicas to keep the architecture simple." }
+      {
+        "id": "A",
+        "text": "Migrate to Amazon RDS MySQL with Multi-AZ deployment. For analytics, create up to 5 RDS Read Replicas and direct analytics queries to them."
+      },
+      {
+        "id": "B",
+        "text": "Keep the database on EC2. Add a second EC2 instance as a MySQL replica in a different Availability Zone. Write a custom failover script triggered by a CloudWatch alarm when the primary instance fails."
+      },
+      {
+        "id": "C",
+        "text": "Migrate to Amazon Aurora MySQL. Aurora automatically maintains 6 copies of data across 3 AZs, provides sub-30-second automatic failover, supports up to 15 Aurora Replicas for read scaling, and offers Aurora Serverless for variable load. Enable the Aurora Reader endpoint for analytics traffic."
+      },
+      {
+        "id": "D",
+        "text": "Migrate to Amazon RDS MySQL with Multi-AZ and enable RDS Proxy in front of the database to reduce failover impact. Do not add read replicas to keep the architecture simple."
+      }
     ],
-    "correct": ["C"],
+    "correct": [
+      "C"
+    ],
     "rationale": "C is correct because Aurora MySQL directly satisfies all requirements. Aurora's 6-copy distributed storage across 3 AZs provides higher durability than RDS Multi-AZ (which maintains one synchronous standby). Aurora's automatic failover typically completes in under 30 seconds (RDS Multi-AZ is 60-120 seconds). Aurora Replicas serve read traffic and can also participate in failover. The Aurora Reader endpoint load-balances analytics queries across up to 15 replicas without impacting the primary. This exceeds 99.95% availability requirements. A is wrong because RDS Read Replicas use asynchronous replication and can have replication lag; they are read-scalable but are not the primary high-availability mechanism. RDS Multi-AZ is synchronous but only keeps one standby. A is close but lacks Aurora's speed and distributed storage architecture. B is wrong because self-managed failover on EC2 is complex, error-prone, and unlikely to achieve 99.95% availability. D is wrong because it meets the availability requirement but explicitly does not address the read-heavy analytics requirement.",
     "sourceUrl": "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.html",
-    "tags": ["aurora", "rds", "multi-az", "read-replica", "high-availability", "mysql"]
+    "tags": [
+      "aurora",
+      "rds",
+      "multi-az",
+      "read-replica",
+      "high-availability",
+      "mysql"
+    ]
   },
   {
     "id": "s2-q04",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
-    "stem": "A media company serves video streaming content to users across North America and Europe. Users in Europe report 3–4 second latency connecting to the streaming API, which is hosted in us-east-1. The API serves small, dynamic JSON responses (video metadata, user preferences) that cannot be cached. The company needs to reduce API latency for European users below 200ms. Which solution achieves this?",
+    "stem": "A media company serves video streaming content to users across North America and Europe. Users in Europe report 3\u20134 second latency connecting to the streaming API, which is hosted in us-east-1. The API serves small, dynamic JSON responses (video metadata, user preferences) that cannot be cached. The company needs to reduce API latency for European users below 200ms. Which solution achieves this?",
     "options": [
-      { "id": "A", "text": "Use Amazon CloudFront with a custom origin pointing to the us-east-1 API. Enable CloudFront caching with a low TTL of 10 seconds." },
-      { "id": "B", "text": "Use AWS Global Accelerator with the us-east-1 API as the endpoint. Global Accelerator routes user traffic to the nearest AWS edge location and forwards it over the AWS global network backbone to us-east-1, eliminating slow public internet routing for most of the journey." },
-      { "id": "C", "text": "Deploy the API to an additional EC2 instance in eu-west-1. Update DNS to use Route 53 latency routing between us-east-1 and eu-west-1." },
-      { "id": "D", "text": "Enable Amazon CloudFront with Lambda@Edge to process the dynamic API responses at edge locations closest to users, eliminating the round-trip to us-east-1." }
+      {
+        "id": "A",
+        "text": "Use Amazon CloudFront with a custom origin pointing to the us-east-1 API. Enable CloudFront caching with a low TTL of 10 seconds."
+      },
+      {
+        "id": "B",
+        "text": "Use AWS Global Accelerator with the us-east-1 API as the endpoint. Global Accelerator routes user traffic to the nearest AWS edge location and forwards it over the AWS global network backbone to us-east-1, eliminating slow public internet routing for most of the journey."
+      },
+      {
+        "id": "C",
+        "text": "Deploy the API to an additional EC2 instance in eu-west-1. Update DNS to use Route 53 latency routing between us-east-1 and eu-west-1."
+      },
+      {
+        "id": "D",
+        "text": "Enable Amazon CloudFront with Lambda@Edge to process the dynamic API responses at edge locations closest to users, eliminating the round-trip to us-east-1."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because AWS Global Accelerator is specifically designed for dynamic, non-cacheable content where the goal is to reduce latency by routing traffic from the user's nearest edge location (Anycast IPs) over the AWS private global network rather than the variable public internet. For a European user, the connection to the AWS network is made in Europe, and the remaining journey to us-east-1 traverses the highly optimized AWS backbone, reducing latency significantly. A is wrong because CloudFront caching with a 10-second TTL would serve stale content; for truly dynamic responses that cannot be cached, CloudFront adds latency rather than reducing it because uncached requests are still forwarded all the way to the origin. C is a valid architectural approach but it requires deploying and maintaining a full API stack in a second region, which is more complex and costly than Global Accelerator. D is wrong because Lambda@Edge cannot maintain the same dynamic data that exists in the us-east-1 origin — it cannot magically know per-user preferences without calling the origin, making it equivalent to a cache miss for every dynamic request.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because AWS Global Accelerator is specifically designed for dynamic, non-cacheable content where the goal is to reduce latency by routing traffic from the user's nearest edge location (Anycast IPs) over the AWS private global network rather than the variable public internet. For a European user, the connection to the AWS network is made in Europe, and the remaining journey to us-east-1 traverses the highly optimized AWS backbone, reducing latency significantly. A is wrong because CloudFront caching with a 10-second TTL would serve stale content; for truly dynamic responses that cannot be cached, CloudFront adds latency rather than reducing it because uncached requests are still forwarded all the way to the origin. C is a valid architectural approach but it requires deploying and maintaining a full API stack in a second region, which is more complex and costly than Global Accelerator. D is wrong because Lambda@Edge cannot maintain the same dynamic data that exists in the us-east-1 origin \u2014 it cannot magically know per-user preferences without calling the origin, making it equivalent to a cache miss for every dynamic request.",
     "sourceUrl": "https://docs.aws.amazon.com/global-accelerator/latest/dg/what-is-global-accelerator.html",
-    "tags": ["global-accelerator", "latency", "cloudfront", "route53", "performance", "global"]
+    "tags": [
+      "global-accelerator",
+      "latency",
+      "cloudfront",
+      "route53",
+      "performance",
+      "global"
+    ]
   },
   {
     "id": "s2-q05",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company runs a public-facing web application behind an Elastic Load Balancer. The application receives steady traffic throughout the week, but marketing campaigns cause sudden 10x traffic spikes lasting 2-4 hours. During the last campaign, new EC2 instances launched by Auto Scaling took 8 minutes to pass health checks, causing dropped requests during the spike onset. Which Auto Scaling configuration changes best reduce request drops at the start of a spike?",
     "options": [
-      { "id": "A", "text": "Switch from a Target Tracking scaling policy based on CPU utilization to a Step Scaling policy with a more aggressive step configuration." },
-      { "id": "B", "text": "Use a Scheduled Scaling action to proactively increase the Auto Scaling group minimum capacity 30 minutes before the known campaign start time. Supplement with a Target Tracking policy based on ALB RequestCountPerTarget to handle unexpected traffic. Reduce the health check grace period if the application is confirmed ready sooner." },
-      { "id": "C", "text": "Increase the Auto Scaling maximum capacity. Use a simple scaling policy triggered by high CPU that adds 1 instance at a time. Set a 2-minute cooldown period." },
-      { "id": "D", "text": "Pre-warm the Elastic Load Balancer by contacting AWS support 24 hours before the campaign and requesting pre-warming. Use the existing Auto Scaling configuration unchanged." }
+      {
+        "id": "A",
+        "text": "Switch from a Target Tracking scaling policy based on CPU utilization to a Step Scaling policy with a more aggressive step configuration."
+      },
+      {
+        "id": "B",
+        "text": "Use a Scheduled Scaling action to proactively increase the Auto Scaling group minimum capacity 30 minutes before the known campaign start time. Supplement with a Target Tracking policy based on ALB RequestCountPerTarget to handle unexpected traffic. Reduce the health check grace period if the application is confirmed ready sooner."
+      },
+      {
+        "id": "C",
+        "text": "Increase the Auto Scaling maximum capacity. Use a simple scaling policy triggered by high CPU that adds 1 instance at a time. Set a 2-minute cooldown period."
+      },
+      {
+        "id": "D",
+        "text": "Pre-warm the Elastic Load Balancer by contacting AWS support 24 hours before the campaign and requesting pre-warming. Use the existing Auto Scaling configuration unchanged."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because it addresses the root cause (reactive scaling lag) with a two-part approach. Scheduled Scaling proactively increases capacity before the campaign begins, eliminating the 8-minute gap entirely for the initial spike. Target Tracking on RequestCountPerTarget provides smooth reactive scaling for unexpected traffic beyond forecast. Reducing the health check grace period (if the app is truly ready sooner) speeds up instance contribution. A is wrong because switching to Step Scaling still reacts after the fact and does not address the 8-minute startup delay. C is wrong because adding 1 instance at a time with a 2-minute cooldown would take dozens of cycles to scale from baseline to 10x during a sudden spike. D is wrong because ALB pre-warming is a real technique but addresses the load balancer's capacity to distribute requests — it does not solve the Auto Scaling lag in provisioning EC2 instances. The existing Auto Scaling configuration remains unchanged, so the 8-minute delay persists.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because it addresses the root cause (reactive scaling lag) with a two-part approach. Scheduled Scaling proactively increases capacity before the campaign begins, eliminating the 8-minute gap entirely for the initial spike. Target Tracking on RequestCountPerTarget provides smooth reactive scaling for unexpected traffic beyond forecast. Reducing the health check grace period (if the app is truly ready sooner) speeds up instance contribution. A is wrong because switching to Step Scaling still reacts after the fact and does not address the 8-minute startup delay. C is wrong because adding 1 instance at a time with a 2-minute cooldown would take dozens of cycles to scale from baseline to 10x during a sudden spike. D is wrong because ALB pre-warming is a real technique but addresses the load balancer's capacity to distribute requests \u2014 it does not solve the Auto Scaling lag in provisioning EC2 instances. The existing Auto Scaling configuration remains unchanged, so the 8-minute delay persists.",
     "sourceUrl": "https://docs.aws.amazon.com/autoscaling/ec2/userguide/scheduled_scaling.html",
-    "tags": ["auto-scaling", "scheduled-scaling", "target-tracking", "elb", "performance", "scaling-policy"]
+    "tags": [
+      "auto-scaling",
+      "scheduled-scaling",
+      "target-tracking",
+      "elb",
+      "performance",
+      "scaling-policy"
+    ]
   },
   {
     "id": "s2-q06",
     "domain": 2,
-    "objective": "2.2 — Design Loosely Coupled Architectures",
+    "objective": "2.2",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company has a monolithic Java application deployed on EC2. The application handles order intake, payment processing, inventory management, and email notification in a single codebase with a shared relational database. Deployments are risky because a change to any component requires a full application restart and frequently causes regressions. The company wants to decompose the monolith incrementally into loosely coupled services without a complete rewrite. Which strangler fig pattern approach using AWS services should they adopt first?",
     "options": [
-      { "id": "A", "text": "Rewrite the entire application as microservices on Amazon ECS with separate RDS databases per service. Cut over all traffic at once on a planned maintenance weekend." },
-      { "id": "B", "text": "Place an Application Load Balancer in front of the monolith. Extract the email notification functionality into a standalone Lambda function. Route all /api/notifications traffic from the ALB to the Lambda function using path-based routing, leaving all other paths pointing to the monolith. The monolith publishes notification events to SQS instead of calling the notification code directly." },
-      { "id": "C", "text": "Deploy a new microservices-based order intake API in parallel. Use Route 53 weighted routing to gradually shift 1% of traffic to the new service per week." },
-      { "id": "D", "text": "Enable AWS X-Ray distributed tracing on the monolith to map all service dependencies before making any architectural changes." }
+      {
+        "id": "A",
+        "text": "Rewrite the entire application as microservices on Amazon ECS with separate RDS databases per service. Cut over all traffic at once on a planned maintenance weekend."
+      },
+      {
+        "id": "B",
+        "text": "Place an Application Load Balancer in front of the monolith. Extract the email notification functionality into a standalone Lambda function. Route all /api/notifications traffic from the ALB to the Lambda function using path-based routing, leaving all other paths pointing to the monolith. The monolith publishes notification events to SQS instead of calling the notification code directly."
+      },
+      {
+        "id": "C",
+        "text": "Deploy a new microservices-based order intake API in parallel. Use Route 53 weighted routing to gradually shift 1% of traffic to the new service per week."
+      },
+      {
+        "id": "D",
+        "text": "Enable AWS X-Ray distributed tracing on the monolith to map all service dependencies before making any architectural changes."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because it demonstrates the strangler fig pattern incrementally and safely. The ALB acts as the strangler facade — it routes requests to either the monolith or the extracted service based on path, allowing the two to coexist. Extracting the email notification service (typically stateless and high-frequency) is a low-risk first step that delivers immediate deployment independence. The SQS decoupling ensures the monolith does not need to know whether the notification Lambda is available. Over time, additional capabilities can be extracted similarly. A is wrong because a full rewrite with a big-bang cutover is the opposite of the strangler fig pattern — it is high-risk and doesn't allow incremental progress. C is wrong because Route 53 weighted routing operates at the DNS level and is suitable for A/B testing or canary deployments of the same service, not for routing different API paths to different services. D is wrong because X-Ray tracing is a useful preparatory step but doesn't decompose the application — it generates no architectural change.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because it demonstrates the strangler fig pattern incrementally and safely. The ALB acts as the strangler facade \u2014 it routes requests to either the monolith or the extracted service based on path, allowing the two to coexist. Extracting the email notification service (typically stateless and high-frequency) is a low-risk first step that delivers immediate deployment independence. The SQS decoupling ensures the monolith does not need to know whether the notification Lambda is available. Over time, additional capabilities can be extracted similarly. A is wrong because a full rewrite with a big-bang cutover is the opposite of the strangler fig pattern \u2014 it is high-risk and doesn't allow incremental progress. C is wrong because Route 53 weighted routing operates at the DNS level and is suitable for A/B testing or canary deployments of the same service, not for routing different API paths to different services. D is wrong because X-Ray tracing is a useful preparatory step but doesn't decompose the application \u2014 it generates no architectural change.",
     "sourceUrl": "https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-aspnet-web-services/strangler-fig.html",
-    "tags": ["strangler-fig", "alb", "lambda", "sqs", "microservices", "migration", "loose-coupling"]
+    "tags": [
+      "strangler-fig",
+      "alb",
+      "lambda",
+      "sqs",
+      "microservices",
+      "migration",
+      "loose-coupling"
+    ]
   },
   {
     "id": "s2-q07",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company needs to route traffic between its on-premises data center and three AWS VPCs: a shared services VPC, a production VPC, and a development VPC. All VPCs and the on-premises network need to communicate with each other. The network team currently uses three separate VPN connections (one per VPC) and three VPC peering connections. Managing individual route tables and VPN tunnels is becoming unmanageable as the topology grows. Which AWS service simplifies this hub-and-spoke topology?",
     "options": [
-      { "id": "A", "text": "Replace VPC peering with VPC PrivateLink for inter-VPC communication. Keep the three individual VPN connections for on-premises connectivity." },
-      { "id": "B", "text": "Merge all three VPCs into a single large VPC with multiple subnets for each environment. Use a single VPN connection for on-premises connectivity." },
-      { "id": "C", "text": "Deploy AWS Transit Gateway. Attach all three VPCs and the on-premises VPN connection to the Transit Gateway. Configure Transit Gateway route tables to control which VPCs can communicate with each other and with on-premises. Use a single VPN connection to Transit Gateway instead of three separate VPN connections." },
-      { "id": "D", "text": "Use AWS Direct Connect with a hosted virtual interface to replace all three VPN connections. Configure BGP to advertise VPC routes to the on-premises network." }
+      {
+        "id": "A",
+        "text": "Replace VPC peering with VPC PrivateLink for inter-VPC communication. Keep the three individual VPN connections for on-premises connectivity."
+      },
+      {
+        "id": "B",
+        "text": "Merge all three VPCs into a single large VPC with multiple subnets for each environment. Use a single VPN connection for on-premises connectivity."
+      },
+      {
+        "id": "C",
+        "text": "Deploy AWS Transit Gateway. Attach all three VPCs and the on-premises VPN connection to the Transit Gateway. Configure Transit Gateway route tables to control which VPCs can communicate with each other and with on-premises. Use a single VPN connection to Transit Gateway instead of three separate VPN connections."
+      },
+      {
+        "id": "D",
+        "text": "Use AWS Direct Connect with a hosted virtual interface to replace all three VPN connections. Configure BGP to advertise VPC routes to the on-premises network."
+      }
     ],
-    "correct": ["C"],
+    "correct": [
+      "C"
+    ],
     "rationale": "C is correct because AWS Transit Gateway is specifically designed for hub-and-spoke network topologies. It acts as a cloud router: all VPCs and VPN/Direct Connect connections attach to it, enabling full-mesh connectivity through a single managed service. Route tables on the Transit Gateway control segmentation (e.g., development and production cannot communicate directly). A single VPN connection to Transit Gateway replaces three individual VPNs, dramatically reducing management complexity. As the company adds more VPCs, each new attachment connects once to TGW rather than requiring peering to every existing VPC. A is wrong because VPC PrivateLink is for exposing specific services across VPC boundaries, not general routed connectivity. It would require a service endpoint per service, not a general network path. B is wrong because merging environments into one VPC eliminates network-level isolation between production and development, which is a serious security concern. D is wrong because Direct Connect improves bandwidth and reliability over VPN but does not simplify the VPC-to-VPC communication topology.",
     "sourceUrl": "https://docs.aws.amazon.com/vpc/latest/tgw/what-is-transit-gateway.html",
-    "tags": ["transit-gateway", "vpc", "vpn", "hub-and-spoke", "networking", "hybrid"]
+    "tags": [
+      "transit-gateway",
+      "vpc",
+      "vpn",
+      "hub-and-spoke",
+      "networking",
+      "hybrid"
+    ]
   },
   {
     "id": "s2-q08",
     "domain": 2,
-    "objective": "2.1 — Design Highly Available and Fault-Tolerant Architectures",
+    "objective": "2.1",
     "difficulty": "hard",
     "type": "single",
     "stem": "A company runs a REST API backend on EC2 instances behind a load balancer. They need to add a new feature: real-time push notifications to web clients when certain backend events occur. The existing HTTP infrastructure cannot push to clients. The notification events are bursty, happening in groups of thousands within seconds. Which AWS service should the solutions architect recommend for the push notification component?",
     "options": [
-      { "id": "A", "text": "Use Amazon SES (Simple Email Service) to send email notifications to users when events occur." },
-      { "id": "B", "text": "Use Amazon API Gateway WebSocket API. When backend events occur, the EC2 instances post a message to the WebSocket API's @connections endpoint, which pushes the message to all connected browser clients in real time." },
-      { "id": "C", "text": "Configure the EC2 instances to open direct TCP sockets to browser clients and push messages over the raw TCP connection." },
-      { "id": "D", "text": "Use Amazon SNS with HTTP subscriptions. Configure browsers to be SNS HTTP subscribers and receive push notifications via SNS." }
+      {
+        "id": "A",
+        "text": "Use Amazon SES (Simple Email Service) to send email notifications to users when events occur."
+      },
+      {
+        "id": "B",
+        "text": "Use Amazon API Gateway WebSocket API. When backend events occur, the EC2 instances post a message to the WebSocket API's @connections endpoint, which pushes the message to all connected browser clients in real time."
+      },
+      {
+        "id": "C",
+        "text": "Configure the EC2 instances to open direct TCP sockets to browser clients and push messages over the raw TCP connection."
+      },
+      {
+        "id": "D",
+        "text": "Use Amazon SNS with HTTP subscriptions. Configure browsers to be SNS HTTP subscribers and receive push notifications via SNS."
+      }
     ],
-    "correct": ["B"],
-    "rationale": "B is correct because API Gateway WebSocket APIs are purpose-built for this use case. Web browsers connect to the WebSocket API and maintain a persistent connection. The backend EC2 instances call the API Gateway Management API (POST to /@connections/{connectionId}) to push messages to specific or all connected clients. This architecture handles bursty event delivery, scales automatically, and does not require the EC2 instances to manage persistent socket state. A is wrong because SES sends email — it is asynchronous, requires email client interaction, and is not real-time web push notification. C is wrong because EC2 instances managing direct TCP sockets to browser clients at scale is complex, stateful, and does not work across NAT — browsers do not accept inbound TCP connections. D is wrong because SNS HTTP subscriptions push to HTTP/HTTPS endpoints (servers), not to browsers. Web browsers cannot receive SNS HTTP push without a server intermediary.",
+    "correct": [
+      "B"
+    ],
+    "rationale": "B is correct because API Gateway WebSocket APIs are purpose-built for this use case. Web browsers connect to the WebSocket API and maintain a persistent connection. The backend EC2 instances call the API Gateway Management API (POST to /@connections/{connectionId}) to push messages to specific or all connected clients. This architecture handles bursty event delivery, scales automatically, and does not require the EC2 instances to manage persistent socket state. A is wrong because SES sends email \u2014 it is asynchronous, requires email client interaction, and is not real-time web push notification. C is wrong because EC2 instances managing direct TCP sockets to browser clients at scale is complex, stateful, and does not work across NAT \u2014 browsers do not accept inbound TCP connections. D is wrong because SNS HTTP subscriptions push to HTTP/HTTPS endpoints (servers), not to browsers. Web browsers cannot receive SNS HTTP push without a server intermediary.",
     "sourceUrl": "https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html",
-    "tags": ["api-gateway", "websocket", "real-time", "push-notification", "serverless", "event-driven"]
+    "tags": [
+      "api-gateway",
+      "websocket",
+      "real-time",
+      "push-notification",
+      "serverless",
+      "event-driven"
+    ]
   }
 ]

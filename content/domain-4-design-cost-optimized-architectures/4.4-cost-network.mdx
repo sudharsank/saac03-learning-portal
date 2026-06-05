@@ -129,7 +129,7 @@ AWS Budgets lets you define thresholds and receive alerts before costs exceed ex
 
 - **Cost budgets**: Alert when actual or forecasted monthly spend exceeds a threshold (e.g., alert at 80% and 100% of $1,000/month budget)
 - **Usage budgets**: Alert when specific service usage (e.g., EC2 running hours, NAT Gateway GB processed) exceeds a threshold
-- **Savings Plans/RI coverage budgets**: Alert when RI or Savings Plans coverage drops below a target (e.g., alert if <70% of EC2 usage is covered by commitments)
+- **Savings Plans/RI coverage budgets**: Alert when RI or Savings Plans coverage drops below a target (e.g., alert if less than 70% of EC2 usage is covered by commitments)
 - **Notifications**: Email, SNS, or budget actions (automatically apply an IAM policy to restrict spend)
 
 The first two budgets per account are free; $0.02/day for each additional budget.
@@ -148,8 +148,8 @@ CUR is the foundation for cost analytics with Athena + QuickSight or third-party
 ### AWS Trusted Advisor Cost Checks
 
 Trusted Advisor provides automated best-practice checks across 5 categories. Cost optimization checks include:
-- **Idle EC2 instances** (CPU <10% for 4+ days)
-- **Underutilized EBS volumes** (write operations <1/day for 7 days)
+- **Idle EC2 instances** (CPU less than 10% for 4+ days)
+- **Underutilized EBS volumes** (write operations less than 1/day for 7 days)
 - **Unassociated Elastic IP addresses** ($0.005/hr each when not attached)
 - **Idle RDS instances** (connections = 0 for 7+ days)
 - **Low utilization EC2 instances** (right-sizing candidates)
@@ -399,7 +399,7 @@ aws ec2 describe-addresses \
 [
   {
     "id": "d4-4-q01",
-    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "objective": "4.4",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -417,7 +417,7 @@ aws ec2 describe-addresses \
   },
   {
     "id": "d4-4-q02",
-    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "objective": "4.4",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -435,7 +435,7 @@ aws ec2 describe-addresses \
   },
   {
     "id": "d4-4-q03",
-    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "objective": "4.4",
     "domain": 4,
     "difficulty": "hard",
     "type": "single",
@@ -453,7 +453,7 @@ aws ec2 describe-addresses \
   },
   {
     "id": "d4-4-q04",
-    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "objective": "4.4",
     "domain": 4,
     "difficulty": "easy",
     "type": "single",
@@ -471,7 +471,7 @@ aws ec2 describe-addresses \
   },
   {
     "id": "d4-4-q05",
-    "objective": "4.4 — Cost-Optimized Network Architectures",
+    "objective": "4.4",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",

@@ -95,7 +95,7 @@ Spot Instances use spare EC2 capacity sold at dynamic prices up to 90% below On-
 
 **Spot Instance best practices**:
 - Diversify across multiple instance types and AZs — no single pool depletes simultaneously
-- Use the Spot Instance Advisor to identify pools with <5% interruption frequency
+- Use the Spot Instance Advisor to identify pools with less than 5% interruption frequency
 - Use EC2 hibernation for stateful Spot workloads where possible
 - Design for graceful shutdown when the 2-minute notice arrives
 
@@ -329,7 +329,7 @@ aws compute-optimizer get-lambda-function-recommendations \
 [
   {
     "id": "d4-2-q01",
-    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -347,7 +347,7 @@ aws compute-optimizer get-lambda-function-recommendations \
   },
   {
     "id": "d4-2-q02",
-    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -365,7 +365,7 @@ aws compute-optimizer get-lambda-function-recommendations \
   },
   {
     "id": "d4-2-q03",
-    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "domain": 4,
     "difficulty": "hard",
     "type": "single",
@@ -383,7 +383,7 @@ aws compute-optimizer get-lambda-function-recommendations \
   },
   {
     "id": "d4-2-q04",
-    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -401,7 +401,7 @@ aws compute-optimizer get-lambda-function-recommendations \
   },
   {
     "id": "d4-2-q05",
-    "objective": "4.2 — Cost-Optimized Compute Solutions",
+    "objective": "4.2",
     "domain": 4,
     "difficulty": "easy",
     "type": "single",

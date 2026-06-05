@@ -86,7 +86,7 @@ Aurora Serverless v2 eliminates the need to pre-provision a fixed DB instance si
 - Provisioned 1 WCU costs $0.47/month
 - On-Demand equivalent: 1 WCU handles 1 write/second = 2,592,000 writes/month = $3.24
 - On-Demand is 7x more expensive per WCU at constant 100% utilization
-- On-Demand is cost-effective when average utilization is <15% of peak (traffic is very spiky)
+- On-Demand is cost-effective when average utilization is less than 15% of peak (traffic is very spiky)
 
 **Decision rule**:
 - Unpredictable/spiky traffic → On-Demand (no under-provisioning risk, no capacity planning)
@@ -313,7 +313,7 @@ aws rds describe-reserved-db-instances-offerings \
 
 - **Aurora Serverless v2 ≠ free during idle**: It scales to a minimum of 0.5 ACU, not zero. There is still a small charge during idle periods. For complete elimination of idle compute costs, consider stopping a standard RDS instance during off-hours instead (though this requires automation and brief unavailability during start-up).
 - **DynamoDB Reserved Capacity applies to provisioned, not On-Demand**: Reserved Capacity provides discounts on provisioned WCU/RCU rates. It has no effect on DynamoDB On-Demand (PAY_PER_REQUEST) billing mode. Switching to On-Demand while having Reserved Capacity wastes the commitment.
-- **RDS Proxy adds latency**: RDS Proxy introduces a small amount of connection latency (typically <1ms). For latency-sensitive applications, this trade-off must be considered — though for Lambda use cases the connection overhead saved far outweighs the proxy latency.
+- **RDS Proxy adds latency**: RDS Proxy introduces a small amount of connection latency (typically less than 1ms). For latency-sensitive applications, this trade-off must be considered — though for Lambda use cases the connection overhead saved far outweighs the proxy latency.
 </ExamAngle>
 
 <Flashcard front="When should you use Aurora Serverless v2 instead of a provisioned Aurora cluster?" back="Use Aurora Serverless v2 for development/test environments, new applications with unknown traffic, or workloads with significant idle periods or sharp traffic cycles. It scales ACUs automatically and bills only for capacity consumed, eliminating idle instance charges." />
@@ -326,7 +326,7 @@ aws rds describe-reserved-db-instances-offerings \
 [
   {
     "id": "d4-3-q01",
-    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -344,7 +344,7 @@ aws rds describe-reserved-db-instances-offerings \
   },
   {
     "id": "d4-3-q02",
-    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -362,7 +362,7 @@ aws rds describe-reserved-db-instances-offerings \
   },
   {
     "id": "d4-3-q03",
-    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "domain": 4,
     "difficulty": "hard",
     "type": "single",
@@ -380,7 +380,7 @@ aws rds describe-reserved-db-instances-offerings \
   },
   {
     "id": "d4-3-q04",
-    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "domain": 4,
     "difficulty": "medium",
     "type": "single",
@@ -398,7 +398,7 @@ aws rds describe-reserved-db-instances-offerings \
   },
   {
     "id": "d4-3-q05",
-    "objective": "4.3 — Cost-Optimized Database Solutions",
+    "objective": "4.3",
     "domain": 4,
     "difficulty": "easy",
     "type": "single",
