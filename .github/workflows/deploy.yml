@@ -30,8 +30,8 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_SITE_URL: https://sudharsank.github.io/__REPO_NAME__
-          NEXT_PUBLIC_BASE_PATH: /__REPO_NAME__
+          NEXT_PUBLIC_SITE_URL: https://sudharsank.github.io/saac03-learning-portal
+          NEXT_PUBLIC_BASE_PATH: /saac03-learning-portal
       
       - uses: actions/upload-pages-artifact@v3
         with:
